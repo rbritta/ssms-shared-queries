@@ -1,0 +1,28 @@
+# Normalize line endings. This repo is Windows-only (SSMS extension), so text
+# files check out as CRLF and the editor/compiler stop warning about it.
+* text=auto eol=crlf
+
+# Explicit text types
+*.cs       text eol=crlf
+*.csproj   text eol=crlf
+*.sln      text eol=crlf
+*.props    text eol=crlf
+*.targets  text eol=crlf
+*.ps1      text eol=crlf
+*.md       text eol=crlf
+*.yml      text eol=crlf
+*.yaml     text eol=crlf
+*.json     text eol=crlf
+*.vsct     text eol=crlf
+*.vsixmanifest text eol=crlf
+*.editorconfig text eol=crlf
+
+# Binary assets
+*.png  binary
+*.ico  binary
+*.vsix binary
+*.3mf  binary
+
+# Keep GitHub language stats focused on the actual source
+*.vsct      linguist-language=XML
+*.vsixmanifest linguist-language=XML

@@ -1,0 +1,44 @@
+name: release
+
+# Tag a commit `vX.Y.Z` to build the VSIX and publish it as a GitHub Release.
+on:
+  push:
+    tags: [ 'v*' ]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore (extension)
+        run: msbuild src/SsmsSharedQueries/SsmsSharedQueries.csproj /t:Restore /p:Configuration=Release /v:minimal /nologo
+
+      - name: Build VSIX
+        run: msbuild src/SsmsSharedQueries/SsmsSharedQueries.csproj /p:Configuration=Release /p:DeployExtension=false /v:minimal /nologo
+
+      - name: Test
+        run: dotnet test tests/SsmsSharedQueries.Tests/SsmsSharedQueries.Tests.csproj -c Release --verbosity normal
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: src/SsmsSharedQueries/bin/Release/SsmsSharedQueries.vsix
+          generate_release_notes: true
+          body: |
+            Download `SsmsSharedQueries.vsix` below.
+
+            Note: Microsoft does not officially support third-party extensions in
+            SSMS 21/22, so install per-machine and see the README for details.

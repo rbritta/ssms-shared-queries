@@ -1,0 +1,41 @@
+name: build
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      # The VSIX build targets come from the Microsoft.VSSDK.BuildTools NuGet
+      # package, so a plain runner (no VS extension workload) can build it.
+      - name: Restore (extension)
+        run: msbuild src/SsmsSharedQueries/SsmsSharedQueries.csproj /t:Restore /p:Configuration=Release /v:minimal /nologo
+
+      - name: Build VSIX
+        run: msbuild src/SsmsSharedQueries/SsmsSharedQueries.csproj /p:Configuration=Release /p:DeployExtension=false /v:minimal /nologo
+
+      - name: Test
+        run: dotnet test tests/SsmsSharedQueries.Tests/SsmsSharedQueries.Tests.csproj -c Release --verbosity normal
+
+      - name: Upload VSIX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SsmsSharedQueries-vsix
+          path: src/SsmsSharedQueries/bin/Release/SsmsSharedQueries.vsix
+          if-no-files-found: error

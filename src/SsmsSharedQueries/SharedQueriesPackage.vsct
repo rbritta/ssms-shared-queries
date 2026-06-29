@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<CommandTable xmlns="http://schemas.microsoft.com/VisualStudio/2005-10-18/CommandTable" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+
+  <Extern href="stdidcmd.h" />
+  <Extern href="vsshlids.h" />
+
+  <Commands package="guidSharedQueriesPackage">
+
+    <Groups>
+      <!-- SSMS has no "View > Other Windows"; place the command in the Tools menu. -->
+      <Group guid="guidSharedQueriesCmdSet" id="ToolsMenuGroup" priority="0x0600">
+        <Parent guid="guidSHLMainMenu" id="IDM_VS_MENU_TOOLS" />
+      </Group>
+    </Groups>
+
+    <Buttons>
+      <Button guid="guidSharedQueriesCmdSet" id="OpenPanelCommandId" priority="0x0100" type="Button">
+        <Parent guid="guidSharedQueriesCmdSet" id="ToolsMenuGroup" />
+        <Icon guid="guidImages" id="bmpIcon" />
+        <Strings>
+          <ButtonText>SSMS Shared Queries</ButtonText>
+        </Strings>
+      </Button>
+    </Buttons>
+
+    <Bitmaps>
+      <Bitmap guid="guidImages" href="Resources\Icon.png" usedList="bmpIcon" />
+    </Bitmaps>
+
+  </Commands>
+
+  <Symbols>
+    <GuidSymbol name="guidSharedQueriesPackage" value="{AECBE929-5676-41FE-933F-41D4ED068030}" />
+    <GuidSymbol name="guidSharedQueriesCmdSet" value="{652F8C92-EE87-45AF-A821-BA4705311483}">
+      <IDSymbol name="ToolsMenuGroup" value="0x1020" />
+      <IDSymbol name="OpenPanelCommandId" value="0x0100" />
+    </GuidSymbol>
+    <GuidSymbol name="guidImages" value="{7C3F1A02-9B55-4E1D-9A77-5C0E2D4B8F31}">
+      <IDSymbol name="bmpIcon" value="1" />
+    </GuidSymbol>
+  </Symbols>
+
+</CommandTable>

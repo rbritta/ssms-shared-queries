@@ -1,0 +1,25 @@
+# Build output
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+
+# Visual Studio / Rider
+.vs/
+*.user
+*.suo
+*.vsidx
+*.DotSettings.user
+_ReSharper*/
+
+# NuGet
+packages/
+*.nupkg
+
+# Packaged extension (ship via GitHub Releases, not the repo)
+*.vsix
+
+# Test / coverage output
+[Tt]est[Rr]esult*/
+*.trx
+coverage*.xml
