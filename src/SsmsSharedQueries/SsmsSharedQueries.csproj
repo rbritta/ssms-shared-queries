@@ -48,6 +48,7 @@
     <Compile Include="UI\QueryPaths.cs" />
     <Compile Include="UI\RowStatus.cs" />
     <Compile Include="UI\SearchMatch.cs" />
+    <Compile Include="UI\MetaFormat.cs" />
     <Compile Include="Git\GitIdentity.cs" />
     <Compile Include="Git\GitResultClassifier.cs" />
     <Compile Include="UI\AiInstructions.cs" />

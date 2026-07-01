@@ -8,6 +8,14 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 _No unreleased changes yet._
 
+## [1.1.1] - 2026-07-01
+
+### Fixed
+- A one-line query now reads "1 line" (singular) instead of "1 lines".
+
+### Docs
+- Refreshed the panel screenshot.
+
 ## [1.1.0] - 2026-07-01
 
 ### Added
@@ -85,6 +93,7 @@ First public release.
 - Microsoft does not officially support third-party SSMS 21/22 extensions; install
   the prebuilt `.vsix` per-machine (see the README).
 
-[Unreleased]: https://github.com/rbritta/ssms-shared-queries/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/rbritta/ssms-shared-queries/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/rbritta/ssms-shared-queries/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/rbritta/ssms-shared-queries/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/rbritta/ssms-shared-queries/releases/tag/v1.0.0

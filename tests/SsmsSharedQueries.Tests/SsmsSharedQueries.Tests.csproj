@@ -37,6 +37,7 @@
     <Compile Include="..\..\src\SsmsSharedQueries\UI\QueryPaths.cs" Link="Linked\QueryPaths.cs" />
     <Compile Include="..\..\src\SsmsSharedQueries\UI\RowStatus.cs" Link="Linked\RowStatus.cs" />
     <Compile Include="..\..\src\SsmsSharedQueries\UI\SearchMatch.cs" Link="Linked\SearchMatch.cs" />
+    <Compile Include="..\..\src\SsmsSharedQueries\UI\MetaFormat.cs" Link="Linked\MetaFormat.cs" />
     <Compile Include="..\..\src\SsmsSharedQueries\UI\AiInstructions.cs" Link="Linked\AiInstructions.cs" />
     <Compile Include="..\..\src\SsmsSharedQueries\UI\FolderMeta.cs" Link="Linked\FolderMeta.cs" />
   </ItemGroup>

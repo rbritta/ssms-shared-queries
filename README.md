@@ -26,7 +26,7 @@ the history doubles as a per-person audit trail.
 
 <div align="center">
 
-<img src="docs/screenshot.png" width="560" alt="The SSMS Shared Queries panel docked in SSMS: colored folders, a struck-through deprecated query, a locked query, per-file authors and live line counts, and the Sync / Submit toolbar." />
+<img src="docs/panel.png" width="560" alt="The SSMS Shared Queries panel docked in SSMS: colored folders, a struck-through deprecated query, a locked query, per-file authors and live line counts, and the Sync / Submit toolbar." />
 
 </div>
 

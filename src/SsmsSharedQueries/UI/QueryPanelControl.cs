@@ -1863,12 +1863,9 @@ namespace SsmsSharedQueries.UI
         private string MetaText(QueryItem it)
         {
             int cur = CountLines(it.FullPath);
-            // when edited but not yet submitted, show committed -> current, rendered with the
-            // arrow glyph (e.g. "15 → 13 lines")
-            string lines = (_modified.Contains(it.RelativePath)
-                            && _baseLines.TryGetValue(it.RelativePath, out var b) && b != cur)
-                ? $"{b} → {cur} lines"
-                : $"{cur} lines";
+            bool hasBase = _baseLines.TryGetValue(it.RelativePath, out var b);
+            // when edited but not yet submitted, show committed -> current ("15 → 13 lines")
+            string lines = MetaFormat.Lines(b, cur, _modified.Contains(it.RelativePath) && hasBase);
             var folder = Path.GetDirectoryName(it.FullPath);
             var fileName = Path.GetFileName(it.FullPath);
             var locker = FolderMeta.GetLock(folder, fileName);
