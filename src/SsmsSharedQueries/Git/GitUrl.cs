@@ -25,6 +25,22 @@ namespace SsmsSharedQueries.Git
         public static bool SameRepository(string a, string b) => Normalize(a) == Normalize(b);
 
         /// <summary>
+        /// A human-readable repository name for display (the tree's repo node, the AI guide title):
+        /// the last path segment of the URL with a ".git" suffix and trailing "/" removed. Handles
+        /// the SSH "scp" form (<c>git@host:owner/Repo.git</c> and <c>git@host:Repo.git</c>) and falls
+        /// back to "repository" for an empty or nameless URL.
+        /// </summary>
+        public static string RepoNameFromUrl(string url)
+        {
+            url = (url ?? string.Empty).Trim().TrimEnd('/');
+            if (url.Length == 0) return "repository";
+            var sep = Math.Max(url.LastIndexOf('/'), url.LastIndexOf(':')); // '/' path, or ':' in scp form
+            var name = sep >= 0 ? url.Substring(sep + 1) : url;
+            if (name.EndsWith(".git", StringComparison.OrdinalIgnoreCase)) name = name.Substring(0, name.Length - 4);
+            return name.Length == 0 ? "repository" : name;
+        }
+
+        /// <summary>
         /// A stable, filesystem-safe folder name for the local clone of a repository, derived
         /// from its URL: the repository's own name plus a short hash of the full normalized URL.
         /// Different repositories never collide (the hash disambiguates same-named repos on

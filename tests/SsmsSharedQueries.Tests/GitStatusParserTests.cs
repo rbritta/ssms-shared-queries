@@ -85,6 +85,52 @@ namespace SsmsSharedQueries.Tests
         }
 
         [Fact]
+        public void FilterUntrackedMeta_returns_only_ssq_files_keeping_queries()
+        {
+            // `git ls-files --others --exclude-standard` lists untracked, non-ignored paths.
+            // Folder-discard must remove the untracked .ssq (a just-set color) but keep new .sql.
+            var output = string.Join("\n", new[]
+            {
+                "Queries/ops/.ssq",
+                "Queries/ops/new_query.sql",
+                "Queries/.ssq",
+            });
+            var list = GitStatusParser.FilterUntrackedMeta(output, ".ssq");
+            Assert.Equal(new[] { "Queries/ops/.ssq", "Queries/.ssq" }, list);
+        }
+
+        [Fact]
+        public void FilterUntrackedMeta_matches_root_level_meta_file()
+        {
+            var list = GitStatusParser.FilterUntrackedMeta(".ssq\n", ".ssq");
+            Assert.Equal(new[] { ".ssq" }, list);
+        }
+
+        [Fact]
+        public void FilterUntrackedMeta_does_not_match_names_that_merely_end_with_ssq()
+        {
+            // ".ssq" is an exact file name, not a suffix: "report.ssq" is a user file, not metadata.
+            var list = GitStatusParser.FilterUntrackedMeta("Queries/report.ssq\nQueries/a.sql\n", ".ssq");
+            Assert.Empty(list);
+        }
+
+        [Fact]
+        public void FilterUntrackedMeta_unquotes_and_tolerates_crlf_and_blanks()
+        {
+            var output = "\"Queries/with space/.ssq\"\r\n\r\nQueries/keep.sql\r\n";
+            var list = GitStatusParser.FilterUntrackedMeta(output, ".ssq");
+            Assert.Equal(new[] { "Queries/with space/.ssq" }, list);
+        }
+
+        [Fact]
+        public void FilterUntrackedMeta_empty_or_null_input_is_empty()
+        {
+            Assert.Empty(GitStatusParser.FilterUntrackedMeta(null, ".ssq"));
+            Assert.Empty(GitStatusParser.FilterUntrackedMeta("", ".ssq"));
+            Assert.Empty(GitStatusParser.FilterUntrackedMeta("Queries/.ssq\n", null));
+        }
+
+        [Fact]
         public void ParseHistoryMap_resolves_oldest_creator_and_newest_author()
         {
             // git log is newest-first. q.sql touched in 3 commits: newest by Carol, oldest by Alice.

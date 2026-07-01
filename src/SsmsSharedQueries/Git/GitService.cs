@@ -267,6 +267,43 @@ namespace SsmsSharedQueries.Git
             return await RunAsync($"checkout HEAD -- {Quote(relPath)}", _localPath, ct).ConfigureAwait(false);
         }
 
+        /// <summary>
+        /// Delete untracked plugin-metadata files (named <paramref name="metaFileName"/>, the
+        /// hidden ".ssq") under a path. Folder-discard calls this after <see cref="RevertPathAsync"/>
+        /// so a color or lock just set on a folder that had none - which lives in a brand-new,
+        /// untracked ".ssq" that "checkout HEAD --" leaves behind - is reverted too. Untracked
+        /// queries (".sql") are never touched, so newly-created queries are still kept.
+        /// </summary>
+        public async Task RemoveUntrackedMetaAsync(string relPath, string metaFileName, CancellationToken ct = default)
+        {
+            if (!IsCloned) return;
+            var r = await RunAsync($"ls-files --others --exclude-standard -- {Quote(relPath)}", _localPath, ct).ConfigureAwait(false);
+            if (!r.Success) return;
+            foreach (var rel in GitStatusParser.FilterUntrackedMeta(r.StdOut, metaFileName))
+            {
+                try
+                {
+                    var full = Path.Combine(_localPath, rel.Replace('/', Path.DirectorySeparatorChar));
+                    if (File.Exists(full)) File.Delete(full);
+                }
+                catch (Exception ex) { Diagnostics.Log.Write("RemoveUntrackedMetaAsync: could not delete " + rel, ex); }
+            }
+        }
+
+        /// <summary>Repo-relative paths of untracked (new, non-ignored) files in the working tree.</summary>
+        public async Task<IReadOnlyList<string>> GetUntrackedRelPathsAsync(CancellationToken ct = default)
+        {
+            var list = new List<string>();
+            if (!IsCloned) return list;
+            var r = await RunAsync("ls-files --others --exclude-standard", _localPath, ct).ConfigureAwait(false);
+            foreach (var line in r.StdOut.Split('\n'))
+            {
+                var p = line.Trim().Trim('"');
+                if (p.Length > 0) list.Add(p);
+            }
+            return list;
+        }
+
         /// <summary>True if the path is tracked by git (i.e. it was submitted at least once).</summary>
         public async Task<bool> IsTrackedAsync(string relPath, CancellationToken ct = default)
         {

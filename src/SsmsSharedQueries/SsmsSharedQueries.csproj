@@ -47,6 +47,10 @@
     <Compile Include="UI\QueryPanelControl.cs" />
     <Compile Include="UI\QueryPaths.cs" />
     <Compile Include="UI\RowStatus.cs" />
+    <Compile Include="UI\SearchMatch.cs" />
+    <Compile Include="Git\GitIdentity.cs" />
+    <Compile Include="Git\GitResultClassifier.cs" />
+    <Compile Include="UI\AiInstructions.cs" />
     <Compile Include="UI\FolderMeta.cs" />
     <Compile Include="UI\CommitDialog.cs" />
     <Compile Include="UI\HistoryDialog.cs" />

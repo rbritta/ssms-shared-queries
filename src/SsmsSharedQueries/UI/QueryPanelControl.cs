@@ -9,6 +9,8 @@ using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
+using System.Windows.Threading;
 using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Shell.Interop;
 using Microsoft.VisualStudio.TextManager.Interop;
@@ -44,10 +46,28 @@ namespace SsmsSharedQueries.UI
         private readonly TreeView _tree = new TreeView { FontSize = 13 };
         private readonly TextBlock _status = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(4, 4, 6, 4), VerticalAlignment = VerticalAlignment.Center };
         private Button _syncBtn, _submitBtn, _settingsBtn;
+        private Grid _emptyState;
+        private TextBlock _emptyTitle;
+        private TextBlock _emptyMsg;
+        private RotateTransform _gearRotate;
+        private bool _autoSynced;
+        private static QueryPanelControl _current;      // latest live panel, for the shared crash guard
+        private static bool _crashGuardInstalled;
         private TextBlock _submitCountTb;
         private TextBlock _repoStatusTb;
         private TextBox _searchBox;
+        private TextBlock _searchWatermark;
+        private Button _clearBtn;
+        private Button _searchBtn;
+        private DispatcherTimer _searchDebounce;
         private string _searchText = string.Empty;
+        // repo-relative paths matching the active search (by file name or by body), and the
+        // subset whose body matched (their tree icon is tinted blue). Recomputed on each rebuild.
+        private readonly HashSet<string> _matches = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> _contentHits = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // body-match results cached per search term so repeated rebuilds do not re-read every file
+        private string _bodyMatchTerm;
+        private readonly Dictionary<string, bool> _bodyMatchCache = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
         private bool _suppressExpandMemory;
 
         private List<QueryItem> _items = new List<QueryItem>();
@@ -63,7 +83,13 @@ namespace SsmsSharedQueries.UI
         private string _userName;
         private int _ahead, _behind;
         private bool _refreshing;
+        private bool _refreshPending; // a refresh was requested while one was in flight -> run once more
+        private bool _busy;           // an operation (sync/submit/...) owns the refresh; skip opportunistic ones
+        private bool _loaded;         // a sync has succeeded and the tree reflects a real repo
+        private bool _resyncPending;  // a sync was requested while one was in flight -> run once more
+        private int _changeCount;     // uncommitted + unpushed count, for the Submit button/badge
         private Style _flatStyle;
+        private Style _flatStyleNoHover;
         private Point _dragStart;
         private object _dragData;
         private bool _dragging;
@@ -110,10 +136,20 @@ namespace SsmsSharedQueries.UI
             Background = SystemColors.WindowBrush;
             Foreground = SystemColors.WindowTextBrush;
 
+            // Safety net: a bug in the plugin must never crash the SSMS host (see
+            // OnDispatcherUnhandledException). Install exactly ONE process-wide handler and route
+            // it to the latest live panel, so recreating the tool window never leaks subscriptions.
+            _current = this;
+            if (!_crashGuardInstalled)
+            {
+                _crashGuardInstalled = true;
+                Dispatcher.CurrentDispatcher.UnhandledException += OnDispatcherUnhandledException;
+            }
+
             LoadStyles();
 
             // Object-Explorer-style toolbar: flat icon buttons.
-            _syncBtn = FlatButton(SyncIcon(DbBrush), "Sync (get the latest from the server)", (s, e) => { Diagnostics.Log.Write("Click: Sync"); Run("Sync", SyncAsync); });
+            _syncBtn = FlatButton(SyncIcon(DbBrush), "Sync (get the latest from the server)", (s, e) => { Diagnostics.Log.Write("Click: Sync"); RunSync(); });
             _submitCountTb = new TextBlock { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(3, 0, 0, 0), Foreground = TextBrush };
             var submitContent = new StackPanel { Orientation = Orientation.Horizontal };
             submitContent.Children.Add(Icon(GeoUp, UpBrush));
@@ -128,40 +164,59 @@ namespace SsmsSharedQueries.UI
             leftButtons.Children.Add(new Border { Width = 1, Margin = new Thickness(3, 2, 3, 2), Background = Frozen(0xC8, 0xC8, 0xC8) });
             leftButtons.Children.Add(_settingsBtn);
 
-            // search field (fills the rest), then a search button and a clear button on the right
+            // search field (fills the rest), with an inline clear (X) at its right edge, then the
+            // content toggle and the search button on the right
             _searchBox = new TextBox
             {
                 MinWidth = 80,
                 VerticalAlignment = VerticalAlignment.Center,
                 VerticalContentAlignment = VerticalAlignment.Center,
                 Margin = new Thickness(4, 0, 2, 0),
-                Padding = new Thickness(3, 1, 3, 1),
+                Padding = new Thickness(3, 1, 18, 1), // right room so text never runs under the inline X
             };
-            var watermark = new TextBlock
+            _searchWatermark = new TextBlock
             {
-                Text = "Search by name...",
+                Text = "Search name or contents...",
                 Foreground = MetaBrush,
                 Margin = new Thickness(8, 0, 0, 0),
                 VerticalAlignment = VerticalAlignment.Center,
                 IsHitTestVisible = false,
             };
-            _searchBox.TextChanged += (s, e) => watermark.Visibility = string.IsNullOrEmpty(_searchBox.Text) ? Visibility.Visible : Visibility.Collapsed;
-            _searchBox.KeyDown += (s, e) => { if (e.Key == Key.Enter) { e.Handled = true; DoSearch(); } };
+            // clear (X) lives INSIDE the search box, right-aligned, shown only when there is text.
+            // It uses the no-hover flat style so it never paints a background over the text box.
+            _clearBtn = FlatButton(ClearIcon(GearBrush), "Clear search (restore the tree)", (s, e) => ClearSearch());
+            if (_flatStyleNoHover != null) _clearBtn.Style = _flatStyleNoHover;
+            _clearBtn.HorizontalAlignment = HorizontalAlignment.Right;
+            _clearBtn.VerticalAlignment = VerticalAlignment.Center;
+            _clearBtn.Margin = new Thickness(0, 0, 4, 0);
+            _clearBtn.Padding = new Thickness(2, 0, 2, 0);
+            _clearBtn.Visibility = Visibility.Collapsed;
+            // search runs automatically ~1s after typing stops (Enter still searches immediately)
+            _searchDebounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(700) };
+            _searchDebounce.Tick += (s, e) => Guard("search", () => { _searchDebounce.Stop(); DoSearch(); });
+            _searchBox.TextChanged += (s, e) => Guard("search-typing", () =>
+            {
+                bool empty = string.IsNullOrEmpty(_searchBox.Text);
+                _searchWatermark.Visibility = empty ? Visibility.Visible : Visibility.Collapsed;
+                _clearBtn.Visibility = empty ? Visibility.Collapsed : Visibility.Visible;
+                _searchDebounce.Stop();
+                _searchDebounce.Start(); // (re)start the 1s idle timer on every keystroke
+            });
+            _searchBox.KeyDown += (s, e) => { if (e.Key == Key.Enter) { e.Handled = true; Guard("search", () => { _searchDebounce.Stop(); DoSearch(); }); } };
             var searchGrid = new Grid();
             searchGrid.Children.Add(_searchBox);
-            searchGrid.Children.Add(watermark);
+            searchGrid.Children.Add(_searchWatermark);
+            searchGrid.Children.Add(_clearBtn); // last = on top, so the X sits over the text box
 
-            var searchBtn = FlatButton(SearchIcon(GearBrush), "Search by file name (Enter)", (s, e) => DoSearch());
-            var clearBtn = FlatButton(ClearIcon(GearBrush), "Clear search (restore the tree)", (s, e) => ClearSearch());
+            _searchBtn = FlatButton(SearchIcon(GearBrush), "Search names and contents (Enter)", (s, e) => DoSearch());
 
             var toolbar = new DockPanel { LastChildFill = true, Margin = new Thickness(2, 2, 2, 3) };
             DockPanel.SetDock(leftButtons, Dock.Left);
-            DockPanel.SetDock(clearBtn, Dock.Right);
-            DockPanel.SetDock(searchBtn, Dock.Right);
+            DockPanel.SetDock(_searchBtn, Dock.Right);
             toolbar.Children.Add(leftButtons);
-            toolbar.Children.Add(clearBtn);
-            toolbar.Children.Add(searchBtn);
+            toolbar.Children.Add(_searchBtn);
             toolbar.Children.Add(searchGrid);
+            UpdateSearchEnabled(); // nothing to search until a sync loads the tree
 
             var historyBtn = FlatButton(new TextBlock { Text = "\U0001F570", VerticalAlignment = VerticalAlignment.Center }, "Show operation history", (s, e) => ShowHistory());
             var footer = new DockPanel { LastChildFill = true, Margin = new Thickness(0, 0, 0, 2) };
@@ -175,27 +230,37 @@ namespace SsmsSharedQueries.UI
             _tree.PreviewMouseLeftButtonUp += Tree_PreviewMouseLeftButtonUp;
             _tree.LostMouseCapture += (s, e) => { _dragging = false; ClearDragVisuals(); };
 
+            // the tree fills the centre; the setup overlay (pastel gear + config link) sits on top,
+            // shown only until a sync succeeds (or when the first auto-sync fails, e.g. no config).
+            _emptyState = BuildEmptyState();
+            _emptyState.Visibility = Visibility.Collapsed;
+            var center = new Grid();
+            center.Children.Add(_tree);
+            center.Children.Add(_emptyState);
+
             var root = new DockPanel { LastChildFill = true };
             DockPanel.SetDock(toolbar, Dock.Top);
             DockPanel.SetDock(footer, Dock.Bottom);
             root.Children.Add(toolbar);
             root.Children.Add(footer);
-            root.Children.Add(_tree);
+            root.Children.Add(center);
             Content = root;
 
+            Loaded += (s, e) => Guard("startup", StartupSync); // auto-sync once the panel is shown
             MouseEnter += (s, e) => RefreshStateFireAndForget();
-            _tree.PreviewKeyDown += (s, e) =>
+            _tree.PreviewKeyDown += (s, e) => Guard("key", () =>
             {
                 if (e.Key == Key.F2 && _tree.SelectedItem is TreeViewItem it) { e.Handled = true; BeginRename(it); }
-            };
+            });
 
             LoadFavorites();
             LoadHistory();
             LoadExpanded();
             BuildTree();
+            RefreshActionButtons(); // Sync/Submit start disabled until a config + successful sync
 
             Diagnostics.Log.Write("QueryPanelControl constructed");
-            SetStatus("Set the repo (gear icon), then Sync (circular arrow).");
+            SetStatus("Loading...", history: false); // replaced by the auto-sync result on Loaded
         }
 
         private void LoadStyles()
@@ -205,6 +270,7 @@ namespace SsmsSharedQueries.UI
                 var rd = (ResourceDictionary)System.Windows.Markup.XamlReader.Parse(StylesXaml);
                 _tree.Resources.MergedDictionaries.Add(rd);
                 _flatStyle = rd["FlatBtn"] as Style;
+                _flatStyleNoHover = rd["FlatBtnNoHover"] as Style;
             }
             catch (Exception ex) { Diagnostics.Log.Write("LoadStyles failed", ex); }
         }
@@ -221,20 +287,147 @@ namespace SsmsSharedQueries.UI
             _repoLocal = git.LocalPath;
             _baseFull = string.IsNullOrWhiteSpace(BaseDirectory) ? git.LocalPath : Path.Combine(git.LocalPath, BaseDirectory);
 
+            // Review the root AI guide on every sync: (re)create it and clear any orphan guides.
+            EnsureAiGuide();
+            await CleanupOrphanGuidesAsync(git);
+
             var identity = await git.GetIdentityAsync();
             _userName = ParseName(identity);
             _historyMap = await git.GetHistoryMapAsync();
-            _modified = await git.GetChangedRelPathsAsync();
+            _modified = await git.GetChangedRelPathsAsync(); // reflects the guide changes above
             _ahead = await git.GetAheadCountAsync();
             _behind = await git.GetBehindCountAsync();
 
             await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+            _loaded = true;
+            ShowEmptyState(false); // synced OK -> hide the setup prompt
             ReloadItems();
             BuildTree();
             SetStatus(_items.Count == 0
                 ? $"No .sql files found under '{BaseDirectory}'. Signed in as {identity}."
                 : $"{_items.Count} queries loaded. Signed in as {identity}.");
             await RefreshStateAsync();
+        }
+
+        /// <summary>
+        /// Auto-sync once when the panel first appears. Rather than pre-checking the settings, we
+        /// just try to sync: if it fails (most often because nothing is configured yet, but also a
+        /// bad URL or a first-time login that has not happened), we show the setup overlay with a
+        /// link to the options instead of a noisy error dialog. The manual Sync button still uses
+        /// Run(), which does surface errors, so the user can retry after configuring.
+        /// </summary>
+        private void StartupSync()
+        {
+            if (_autoSynced) return;
+            // If the package/options are not ready yet (panel shown very early in load), retry
+            // shortly rather than wrongly concluding "not configured".
+            if (SharedQueriesPackage.Instance?.Options == null)
+            {
+                var wait = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
+                wait.Tick += (s, e) => { wait.Stop(); Guard("startup", StartupSync); };
+                wait.Start();
+                return;
+            }
+            _autoSynced = true;
+            RunSync();
+        }
+
+        /// <summary>
+        /// Sync and, on failure, show the setup overlay instead of an error dialog. A blank/invalid
+        /// repository is the common failure and needs a "set it up" prompt, not a stack trace. Used
+        /// by the manual Sync button, the startup auto-sync, and the on-settings-changed reload.
+        /// </summary>
+        private void RunSync()
+        {
+            // Only one sync may touch the repo at a time. A settings Apply (or a click) arriving while
+            // a sync is in flight is remembered and run once the current one finishes, so two git
+            // processes never race the same working tree. Runs on the single UI thread, so no TOCTOU.
+            if (_busy) { _resyncPending = true; return; }
+            ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+            {
+                try
+                {
+                    SetActionsEnabled(false);
+                    ShowSyncingOverlay(); // spinning gear while syncing
+                    await SyncAsync();    // success hides the overlay
+                }
+                catch (Exception ex)
+                {
+                    Diagnostics.Log.Write("Sync failed; prompting setup", ex);
+                    await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                    ShowSetupOverlay();
+                }
+                finally
+                {
+                    SetActionsEnabled(true);
+                    try { await RefreshStateAsync(); } catch (Exception ex) { Diagnostics.Log.Write("post-sync refresh failed", ex); }
+                    if (_resyncPending) { _resyncPending = false; RunSync(); } // apply a change that arrived mid-sync
+                }
+            }).FileAndForget("SsmsSharedQueries/sync");
+        }
+
+        /// <summary>Called when the user applies the options page: reload (equivalent to Sync) with
+        /// the new repository/branch/cache, so clearing or fixing the settings takes effect at once.</summary>
+        public static void NotifySettingsChanged()
+        {
+            var c = _current;
+            if (c == null) return;
+            c._autoSynced = true; // a sync is happening now
+            c.Guard("settings-changed", c.RunSync);
+        }
+
+        /// <summary>Show the overlay in its "working" state: a slowly spinning gear and a
+        /// "Syncing..." caption (no setup link). Shown for the duration of every sync.</summary>
+        private void ShowSyncingOverlay()
+        {
+            if (_emptyTitle != null) _emptyTitle.Text = "Syncing...";
+            // Hidden (not Collapsed) keeps the message's layout space so the gear does not shift
+            // between the 1-line "Syncing..." state and the multi-line setup message.
+            if (_emptyMsg != null) _emptyMsg.Visibility = Visibility.Hidden;
+            ShowEmptyState(true);
+            SetGearSpinning(true);
+        }
+
+        private void SetGearSpinning(bool on)
+        {
+            if (_gearRotate == null) return;
+            if (on)
+            {
+                var spin = new DoubleAnimation(0, 360, new Duration(TimeSpan.FromSeconds(5)))
+                { RepeatBehavior = RepeatBehavior.Forever };
+                _gearRotate.BeginAnimation(RotateTransform.AngleProperty, spin);
+            }
+            else
+            {
+                _gearRotate.BeginAnimation(RotateTransform.AngleProperty, null); // stop
+                _gearRotate.Angle = 0;
+            }
+        }
+
+        /// <summary>Show the setup overlay with a message that matches WHY sync could not run:
+        /// nothing configured yet, vs a configured repo that failed to load.</summary>
+        private void ShowSetupOverlay()
+        {
+            bool configured = !string.IsNullOrWhiteSpace(SharedQueriesPackage.Instance?.Options?.RepositoryUrl);
+            SetGearSpinning(false);
+            if (_emptyMsg != null) _emptyMsg.Visibility = Visibility.Visible;
+            _loaded = false;
+            _items = new List<QueryItem>(); // the previously loaded tree is no longer valid
+            BuildTree();                    // clears the tree behind the overlay and disables search
+            _changeCount = 0;
+            _submitCountTb.Text = string.Empty;
+            RefreshActionButtons();         // Sync/Submit off (Submit off; Sync off unless config is complete)
+            if (_emptyTitle != null) _emptyTitle.Text = configured ? "Couldn't load the repository" : "No repository configured";
+            ShowEmptyState(true);
+            SetStatus(configured
+                ? "Could not sync. Check the repository settings, then click Sync."
+                : "Set up the shared queries repository to get started.", history: false);
+        }
+
+        private void ShowEmptyState(bool show)
+        {
+            if (_emptyState != null) _emptyState.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+            if (!show) SetGearSpinning(false); // hidden -> stop the animation
         }
 
         private async Task InsertAsync()
@@ -349,6 +542,78 @@ namespace SsmsSharedQueries.UI
             var node = FindNodeByPath(path);
             if (node != null) BeginRename(node, isNew: true);
             SetStatus("Type the file name (Enter keeps, Esc discards).", history: false);
+        }
+
+        /// <summary>
+        /// Create or refresh the auto-managed AI guide (CLAUDE.md + AGENTS.md mirror) in the configured
+        /// queries folder (the repo root when no subfolder is configured). Writes only when missing or
+        /// when an older auto-managed version shipped; a user-customized file is left untouched. The
+        /// new/updated file shows up as a pending change, and the first teammate to Submit shares it.
+        /// Note: an AI agent launched at the git root will pick this up on demand when it reads files
+        /// in the queries folder, or via the walk-up if launched inside it.
+        /// </summary>
+        private void EnsureAiGuide()
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(_baseFull)) return;
+                Directory.CreateDirectory(_baseFull);
+                var enc = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+                foreach (var fn in new[] { AiInstructions.ClaudeFile, AiInstructions.AgentsFile })
+                {
+                    var path = Path.Combine(_baseFull, fn);
+                    var existing = File.Exists(path) ? File.ReadAllText(path) : null;
+                    if (AiInstructions.ShouldWrite(existing))
+                        File.WriteAllText(path, AiInstructions.BuildGuide(RepoName()), enc);
+                }
+            }
+            catch (Exception ex) { Diagnostics.Log.Write("EnsureAiGuide failed", ex); }
+        }
+
+        /// <summary>
+        /// Remove untracked AI guide files (CLAUDE.md / AGENTS.md) that are NOT in the configured
+        /// queries folder, so only the single auto-managed guide there remains (clears ones left by
+        /// the old per-folder action or an earlier wrong location). Tracked ones are left alone -
+        /// removing a teammate's committed file would need a deliberate migration, not a silent delete.
+        /// </summary>
+        private async Task CleanupOrphanGuidesAsync(GitService git)
+        {
+            try
+            {
+                var baseRel = MakeRelative(_repoLocal, _baseFull).Trim('/'); // "" when the base is the repo root
+                foreach (var rel in await git.GetUntrackedRelPathsAsync())
+                {
+                    if (!AiInstructions.IsOrphanGuide(rel, baseRel)) continue; // keep non-guides and the canonical guide
+                    try
+                    {
+                        var full = Path.Combine(_repoLocal, rel.Replace('/', Path.DirectorySeparatorChar));
+                        if (File.Exists(full)) { File.Delete(full); Diagnostics.Log.Write("Removed orphan AI guide " + rel); }
+                    }
+                    catch (Exception ex) { Diagnostics.Log.Write("Could not remove orphan guide " + rel, ex); }
+                }
+            }
+            catch (Exception ex) { Diagnostics.Log.Write("CleanupOrphanGuidesAsync failed", ex); }
+        }
+
+        /// <summary>Open one of the AI guide files in the queries folder for editing, creating it first if needed.</summary>
+        private void EditAiRules(string fileName)
+        {
+            if (!EnsureSynced()) return;
+            try
+            {
+                Directory.CreateDirectory(_baseFull);
+                var path = Path.Combine(_baseFull, fileName);
+                if (!File.Exists(path))
+                    File.WriteAllText(path, AiInstructions.BuildGuide(RepoName()), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+                OpenFileInEditor(path);
+                RefreshStateFireAndForget();
+                SetStatus($"Opened the AI rules ({fileName}). Edit, then Submit to share with the team.");
+            }
+            catch (Exception ex)
+            {
+                Diagnostics.Log.Write("EditAiRules failed", ex);
+                SetStatus("Could not open the AI rules: " + ex.Message);
+            }
         }
 
         private void DeleteFolder(string folderFull)
@@ -573,7 +838,13 @@ namespace SsmsSharedQueries.UI
             if (r != MessageBoxResult.Yes) return;
             Run("Discard", async () =>
             {
-                await CreateGit().RevertPathAsync(rel);
+                var git = CreateGit();
+                await git.RevertPathAsync(rel);
+                // .ssq folder metadata (color/locks) is plugin-managed, not user content. A color or
+                // lock just set on a folder that had none lives in a brand-new, untracked .ssq, which
+                // the checkout above leaves behind - so also drop untracked .ssq files to revert that
+                // metadata to its committed state. New .sql queries are still kept.
+                await git.RemoveUntrackedMetaAsync(rel, FolderMeta.FileName);
                 await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
                 ReloadItems(); BuildTree();
                 SetStatus($"Reverted changes under '{MakeRelative(_baseFull, folderFull)}'.");
@@ -702,14 +973,14 @@ namespace SsmsSharedQueries.UI
         // ---- drag & drop (move files/folders into folders) -----------------
 
         // Manual drag (no OLE DoDragDrop: that throws DV_E_FORMATETC inside SSMS).
-        private void Tree_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        private void Tree_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e) => Guard("mouse-down", () =>
         {
             _dragStart = e.GetPosition(_tree);
             _dragData = FindItem(e.OriginalSource as DependencyObject)?.Tag;
             _dragging = false;
-        }
+        });
 
-        private void Tree_PreviewMouseMove(object sender, MouseEventArgs e)
+        private void Tree_PreviewMouseMove(object sender, MouseEventArgs e) => Guard("mouse-move", () =>
         {
             if (_dragData == null || e.LeftButton != MouseButtonState.Pressed) return;
             var p = e.GetPosition(_tree);
@@ -724,9 +995,9 @@ namespace SsmsSharedQueries.UI
             }
             _dragAdorner?.UpdatePosition(p.X, p.Y);
             HighlightDropTarget(TargetFolderItem(FindItem(_tree.InputHitTest(p) as DependencyObject)));
-        }
+        });
 
-        private void Tree_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+        private void Tree_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e) => Guard("mouse-up", () =>
         {
             if (!_dragging) { _dragData = null; return; }
             _dragging = false;
@@ -745,7 +1016,7 @@ namespace SsmsSharedQueries.UI
                 if (locker != null) { SetStatus($"Cannot move '{qi.DisplayName}' - locked by {locker}."); return; }
             }
             MoveInto(data, folder);
-        }
+        });
 
         private string TargetFolderOf(TreeViewItem item)
         {
@@ -858,6 +1129,17 @@ namespace SsmsSharedQueries.UI
             _suppressExpandMemory = true;  // setting IsExpanded while (re)building must not pollute the saved state
             try { BuildTreeCore(); }
             finally { _suppressExpandMemory = false; }
+            UpdateSearchEnabled();
+        }
+
+        /// <summary>Search only makes sense once queries are loaded; disable the box and button
+        /// (and hide the inline clear) while the tree is empty (e.g. before the first sync).</summary>
+        private void UpdateSearchEnabled()
+        {
+            bool has = _loaded && _items != null && _items.Count > 0;
+            if (_searchBox != null) _searchBox.IsEnabled = has;
+            if (_searchBtn != null) _searchBtn.IsEnabled = has;
+            if (!has && _clearBtn != null) _clearBtn.Visibility = Visibility.Collapsed;
         }
 
         private void BuildTreeCore()
@@ -866,9 +1148,10 @@ namespace SsmsSharedQueries.UI
             _nameByRel.Clear();
             _metaByRel.Clear();
             _repoStatusTb = null;
+            RecomputeMatches(); // refresh which queries match before the tree consults _matches
 
             var favItems = _items.Where(i => _favorites.Contains(i.RelativePath))
-                                 .Where(i => NameMatches(Path.GetFileName(i.FullPath)))
+                                 .Where(ItemMatches)
                                  .OrderBy(i => i.DisplayName, StringComparer.OrdinalIgnoreCase).ToList();
             if (favItems.Count > 0)
             {
@@ -933,9 +1216,9 @@ namespace SsmsSharedQueries.UI
             var locks = FolderMeta.GetLocks(dirFull);
             foreach (var f in Directory.GetFiles(dirFull, "*.sql").OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
             {
-                if (Searching && !NameMatches(Path.GetFileName(f))) continue;
                 var it = _items.FirstOrDefault(i => string.Equals(i.FullPath, f, StringComparison.OrdinalIgnoreCase))
                          ?? new QueryItem { FullPath = f, RelativePath = MakeRelative(_repoLocal, f), DisplayName = MakeRelative(_baseFull, f) };
+                if (Searching && !ItemMatches(it)) continue;
                 locks.TryGetValue(Path.GetFileName(f), out var locker);
                 parent.Items.Add(MakeLeaf(it, showFullPath: false, locker: locker));
             }
@@ -977,7 +1260,9 @@ namespace SsmsSharedQueries.UI
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });  // favorite star (after name)
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }); // meta
 
-            var fileIcon = locked ? (UIElement)Icon(GeoLock, LockBrush, TreeIconSize) : FileIcon();
+            bool contentHit = MatchedInContent(it); // body matched the search -> tint the icon blue
+            var fileIcon = locked ? (UIElement)Icon(GeoLock, LockBrush, TreeIconSize)
+                                  : FileIcon(contentHit ? SearchHighlightBrush : null);
             Grid.SetColumn(fileIcon, 0);
             grid.Children.Add(fileIcon);
 
@@ -1010,34 +1295,25 @@ namespace SsmsSharedQueries.UI
             if (!_metaByRel.TryGetValue(it.RelativePath, out var mlist)) { mlist = new List<TextBlock>(); _metaByRel[it.RelativePath] = mlist; }
             mlist.Add(metaTb);
 
+            var tip = locked ? $"{it.DisplayName}\nLocked by {locker}" : it.DisplayName;
+            if (contentHit) tip += "\nMatches file contents"; // explains the blue icon
             var leaf = new TreeViewItem
             {
                 Header = grid,
                 Tag = it,
                 HorizontalContentAlignment = HorizontalAlignment.Stretch,
-                ToolTip = locked ? $"{it.DisplayName}\nLocked by {locker}" : it.DisplayName,
+                ToolTip = tip,
             };
 
             var menu = new ContextMenu();
-            // -- content --
+            // -- use (safe read actions) --
             var open = new MenuItem { Header = locked ? $"Open (locked by {locker})" : "Open", IsEnabled = !locked };
             open.Click += (s, e) => { SelectLeaf(it); OpenQuery(it); };
             menu.Items.Add(open);
-            var discard = new MenuItem { Header = "Discard changes", IsEnabled = !locked && modified };
-            discard.Click += (s, e) => DiscardChanges(it);
-            menu.Items.Add(discard);
             var insert = new MenuItem { Header = "Insert into editor" };
             insert.Click += (s, e) => { SelectLeaf(it); Run("Insert", InsertAsync); };
             menu.Items.Add(insert);
-            // -- file management --
-            menu.Items.Add(new Separator());
-            var rename = new MenuItem { Header = "Rename...", IsEnabled = !locked };
-            rename.Click += (s, e) => BeginRename(NodeOf(s));
-            menu.Items.Add(rename);
-            var del = new MenuItem { Header = "Delete", IsEnabled = !locked };
-            del.Click += (s, e) => DeleteFile(it);
-            menu.Items.Add(del);
-            // -- organize --
+            // -- state / organize --
             menu.Items.Add(new Separator());
             var toggleFav = new MenuItem { Header = fav ? "Remove from favorites" : "Add to favorites" };
             toggleFav.Click += (s, e) => ToggleFavorite(it);
@@ -1048,6 +1324,17 @@ namespace SsmsSharedQueries.UI
             var toggleDeprecated = new MenuItem { Header = deprecated ? "Remove deprecated mark" : "Mark as deprecated", IsEnabled = committed };
             toggleDeprecated.Click += (s, e) => ToggleDeprecated(it);
             menu.Items.Add(toggleDeprecated);
+            // -- edit the file (rename + the two data-loss actions, isolated from the read actions) --
+            menu.Items.Add(new Separator());
+            var rename = new MenuItem { Header = "Rename...", IsEnabled = !locked };
+            rename.Click += (s, e) => BeginRename(NodeOf(s));
+            menu.Items.Add(rename);
+            var discard = new MenuItem { Header = "Discard changes", IsEnabled = !locked && modified };
+            discard.Click += (s, e) => DiscardChanges(it);
+            menu.Items.Add(discard);
+            var del = new MenuItem { Header = "Delete", IsEnabled = !locked };
+            del.Click += (s, e) => DeleteFile(it);
+            menu.Items.Add(del);
             // -- info --
             menu.Items.Add(new Separator());
             var info = new MenuItem { Header = "Info" };
@@ -1066,13 +1353,13 @@ namespace SsmsSharedQueries.UI
             };
             leaf.ContextMenu = menu;
 
-            leaf.MouseDoubleClick += (s, e) =>
+            leaf.MouseDoubleClick += (s, e) => Guard("double-click", () =>
             {
                 if (!ReferenceEquals(_tree.SelectedItem, leaf)) return;
                 e.Handled = true;
                 // Double-click does the same as right-click > Open (a no-op while locked, like the menu item).
                 if (!locked) { SelectLeaf(it); OpenQuery(it); }
-            };
+            });
             return leaf;
         }
 
@@ -1111,8 +1398,35 @@ namespace SsmsSharedQueries.UI
                 resetColor.Click += (s, e) => ResetFolderColor(folderFull);
                 menu.Items.Add(resetColor);
             }
+            // -- reveal / config --
+            menu.Items.Add(new Separator());
+            var explorer = new MenuItem { Header = "Open in File Explorer" };
+            explorer.Click += (s, e) => OpenInExplorer(folderFull);
+            menu.Items.Add(explorer);
+            if (isRoot)
+            {
+                // The AI guide is auto-managed; this submenu just opens a file for editing.
+                var aiRules = new MenuItem { Header = "Edit AI rules" };
+                var editClaude = new MenuItem { Header = "Edit " + AiInstructions.ClaudeFile };
+                editClaude.Click += (s, e) => EditAiRules(AiInstructions.ClaudeFile);
+                var editAgents = new MenuItem { Header = "Edit " + AiInstructions.AgentsFile };
+                editAgents.Click += (s, e) => EditAiRules(AiInstructions.AgentsFile);
+                aiRules.Items.Add(editClaude);
+                aiRules.Items.Add(editAgents);
+                menu.Items.Add(aiRules);
+            }
             menu.Opened += (s, e) => discard.IsEnabled = FolderHasChanges(folderFull);
             return menu;
+        }
+
+        private void OpenInExplorer(string folderFull)
+        {
+            try
+            {
+                if (!Directory.Exists(folderFull)) { SetStatus("Folder not found - Sync first."); return; }
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", $"\"{folderFull}\"") { UseShellExecute = true });
+            }
+            catch (Exception ex) { Diagnostics.Log.Write("OpenInExplorer failed", ex); SetStatus("Could not open the folder: " + ex.Message); }
         }
 
         private void RecolorModified()
@@ -1170,7 +1484,19 @@ namespace SsmsSharedQueries.UI
 
         private static TreeViewItem FindItem(DependencyObject src)
         {
-            while (src != null && !(src is TreeViewItem)) src = VisualTreeHelper.GetParent(src);
+            // Walk up to the owning TreeViewItem. The source may be a text Run (a highlighted
+            // search match) or another ContentElement, which is NOT a Visual - calling
+            // VisualTreeHelper.GetParent on it throws and would crash the host. Step through the
+            // content parent in that case, then continue up the visual tree.
+            while (src != null && !(src is TreeViewItem))
+            {
+                if (src is System.Windows.Media.Visual || src is System.Windows.Media.Media3D.Visual3D)
+                    src = VisualTreeHelper.GetParent(src);
+                else if (src is FrameworkContentElement fce)
+                    src = fce.Parent;
+                else
+                    src = null;
+            }
             return src as TreeViewItem;
         }
 
@@ -1206,7 +1532,11 @@ namespace SsmsSharedQueries.UI
             catch (Exception ex) { Diagnostics.Log.Write("SaveFavorites failed", ex); }
         }
 
-        // ---- search (visual filter + blue highlight, local only) -----------
+        // ---- search (visual filter, local only) ----------------------------
+        // A single search always matches both the file NAME and the file BODY. Name matches
+        // highlight the matched letters blue; body matches tint the file icon blue. Matching is
+        // computed once per rebuild into _matches (union) and _contentHits (body matches), so
+        // each file is read at most once per search; the tree, favorites and count consult them.
 
         private bool Searching => !string.IsNullOrEmpty(_searchText);
 
@@ -1216,55 +1546,87 @@ namespace SsmsSharedQueries.UI
             BuildTree();
             if (Searching)
             {
-                int n = CountVisibleMatches();
-                SetStatus(n == 0 ? $"No queries match '{_searchText}'." : $"{n} quer{(n == 1 ? "y" : "ies")} match '{_searchText}'.", history: false);
+                int n = _matches.Count;
+                SetStatus(n == 0 ? $"No queries match '{_searchText}'." : $"{n} quer{(n == 1 ? "y" : "ies")} match '{_searchText}' (name or contents).", history: false);
             }
             else SetStatus("Search cleared.", history: false);
         }
 
         private void ClearSearch()
         {
+            _searchDebounce?.Stop();
             if (_searchBox.Text.Length == 0 && !Searching) return;
-            _searchBox.Text = string.Empty;
+            _searchBox.Text = string.Empty; // fires TextChanged, which restarts the timer...
+            _searchDebounce?.Stop();        // ...cancel it: we are clearing right now
             _searchText = string.Empty;
             BuildTree();
             SetStatus("Search cleared.", history: false);
         }
 
-        private int CountVisibleMatches() => _items.Count(i => NameMatches(Path.GetFileName(i.FullPath)));
+        /// <summary>
+        /// Recompute which queries match the active search. Each file is read once: a name hit or
+        /// a body hit puts it in <see cref="_matches"/> (drives the filter); a body hit also goes
+        /// into <see cref="_contentHits"/> (drives the blue icon).
+        /// </summary>
+        private void RecomputeMatches()
+        {
+            _matches.Clear();
+            _contentHits.Clear();
+            if (!Searching) return;
+            // The search term is stable across most rebuilds (favorite toggle, rename, move,
+            // refresh), so cache each file's body-match result keyed on the term and only read a
+            // file when its cached result is missing (new term, or the file was just edited). This
+            // keeps every post-search UI action from re-reading the whole library on the UI thread.
+            if (!string.Equals(_bodyMatchTerm, _searchText, StringComparison.Ordinal))
+            {
+                _bodyMatchCache.Clear();
+                _bodyMatchTerm = _searchText;
+            }
+            foreach (var it in _items)
+            {
+                bool nameHit = SearchMatch.LooseContains(Path.GetFileName(it.FullPath), _searchText);
+                if (!_bodyMatchCache.TryGetValue(it.RelativePath, out var bodyHit))
+                {
+                    try { bodyHit = SearchMatch.Contains(File.ReadAllText(it.FullPath), _searchText); }
+                    catch (Exception ex) { bodyHit = false; Diagnostics.Log.Write("search: could not read " + it.RelativePath, ex); }
+                    _bodyMatchCache[it.RelativePath] = bodyHit;
+                }
+                if (bodyHit) _contentHits.Add(it.RelativePath);
+                if (nameHit || bodyHit) _matches.Add(it.RelativePath);
+            }
+        }
 
-        private bool NameMatches(string fileName)
-            => !Searching || fileName.IndexOf(_searchText, StringComparison.OrdinalIgnoreCase) >= 0;
+        private bool ItemMatches(QueryItem it) => !Searching || _matches.Contains(it.RelativePath);
 
-        /// <summary>True if the folder (recursively) contains at least one matching .sql file.</summary>
+        /// <summary>True while searching and the query's body (not just its name) matched, so its
+        /// tree icon is tinted blue.</summary>
+        private bool MatchedInContent(QueryItem it) => Searching && _contentHits.Contains(it.RelativePath);
+
+        /// <summary>True if the folder (recursively) contains at least one matching query.</summary>
         private bool DirMatches(string dirFull)
         {
-            try
-            {
-                foreach (var f in Directory.GetFiles(dirFull, "*.sql"))
-                    if (NameMatches(Path.GetFileName(f))) return true;
-                foreach (var sub in Directory.GetDirectories(dirFull))
-                    if (DirMatches(sub)) return true;
-            }
-            catch { }
+            var rel = MakeRelative(_repoLocal, dirFull).TrimEnd('/');
+            foreach (var it in _items)
+                if (_matches.Contains(it.RelativePath)
+                    && it.RelativePath.StartsWith(rel + "/", StringComparison.OrdinalIgnoreCase))
+                    return true;
             return false;
         }
 
-        /// <summary>A name TextBlock; when searching, the matched letters are rendered in blue.</summary>
+        /// <summary>A name TextBlock; when searching, the matched span (separator-insensitive, so
+        /// "allt" highlights "all-t" in "all-tables") is rendered in blue.</summary>
         private TextBlock BuildHighlightedName(string name, Brush baseBrush)
         {
             var tb = new TextBlock { VerticalAlignment = VerticalAlignment.Center, Foreground = baseBrush };
-            if (!Searching) { tb.Text = name; return tb; }
-            var term = _searchText;
-            int idx = 0;
-            while (idx <= name.Length)
+            if (!Searching || !SearchMatch.LooseMatchSpan(name, _searchText, out int start, out int len))
             {
-                int matchPos = idx < name.Length ? name.IndexOf(term, idx, StringComparison.OrdinalIgnoreCase) : -1;
-                if (matchPos < 0) { if (idx < name.Length) tb.Inlines.Add(new Run(name.Substring(idx))); break; }
-                if (matchPos > idx) tb.Inlines.Add(new Run(name.Substring(idx, matchPos - idx)));
-                tb.Inlines.Add(new Run(name.Substring(matchPos, term.Length)) { Foreground = SearchHighlightBrush, FontWeight = FontWeights.Bold });
-                idx = matchPos + term.Length;
+                tb.Text = name;
+                return tb;
             }
+            if (start > 0) tb.Inlines.Add(new Run(name.Substring(0, start)));
+            tb.Inlines.Add(new Run(name.Substring(start, len)) { Foreground = SearchHighlightBrush, FontWeight = FontWeights.Bold });
+            int after = start + len;
+            if (after < name.Length) tb.Inlines.Add(new Run(name.Substring(after)));
             return tb;
         }
 
@@ -1333,12 +1695,17 @@ namespace SsmsSharedQueries.UI
         private void ShowHistory()
             => new HistoryDialog(_history) { Owner = Window.GetWindow(this) }.ShowDialog();
 
+        private const int MaxHistory = 500;   // keep the most recent N operations, in memory and on disk
+        private int _appendsSinceCompact;
+
         private void LoadHistory()
         {
             try
             {
-                if (File.Exists(HistoryPath))
-                    _history.AddRange(File.ReadAllLines(HistoryPath).Where(l => !string.IsNullOrWhiteSpace(l)));
+                if (!File.Exists(HistoryPath)) return;
+                var lines = File.ReadAllLines(HistoryPath).Where(l => !string.IsNullOrWhiteSpace(l)).ToList();
+                if (lines.Count > MaxHistory) lines = lines.Skip(lines.Count - MaxHistory).ToList();
+                _history.AddRange(lines);
             }
             catch (Exception ex) { Diagnostics.Log.Write("LoadHistory failed", ex); }
         }
@@ -1347,25 +1714,46 @@ namespace SsmsSharedQueries.UI
         {
             var line = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss}  {text}";
             _history.Add(line);
-            try { Directory.CreateDirectory(DataDir); File.AppendAllText(HistoryPath, line + Environment.NewLine); }
+            if (_history.Count > MaxHistory) _history.RemoveRange(0, _history.Count - MaxHistory);
+            try
+            {
+                Directory.CreateDirectory(DataDir);
+                File.AppendAllText(HistoryPath, line + Environment.NewLine);
+                // periodically rewrite the file from the capped list so it never grows without bound
+                if (++_appendsSinceCompact >= 200) { File.WriteAllLines(HistoryPath, _history); _appendsSinceCompact = 0; }
+            }
             catch { }
         }
 
         // ---- change count + recolor ---------------------------------------
 
         private void RefreshStateFireAndForget()
-            => ThreadHelper.JoinableTaskFactory.RunAsync(RefreshStateAsync).FileAndForget("SsmsSharedQueries/state");
+        {
+            if (_busy) return; // an operation's own trailing refresh will run; don't compete with it
+            ThreadHelper.JoinableTaskFactory.RunAsync(RefreshStateAsync).FileAndForget("SsmsSharedQueries/state");
+        }
 
         private async Task RefreshStateAsync()
         {
-            if (_refreshing) return;
+            // Coalesce: if a refresh is already running, ask it to run once more when it finishes
+            // (instead of silently dropping this request and leaving the UI stale).
+            if (_refreshing) { _refreshPending = true; return; }
             _refreshing = true;
+            try
+            {
+                do { _refreshPending = false; await RefreshStateOnceAsync(); } while (_refreshPending);
+            }
+            finally { _refreshing = false; }
+        }
+
+        private async Task RefreshStateOnceAsync()
+        {
             int count = 0, ahead = 0, behind = 0;
             HashSet<string> modified = null;
             Dictionary<string, int> newBase = null;
             try
             {
-                if (_repoLocal != null && Directory.Exists(Path.Combine(_repoLocal, ".git")))
+                if (_loaded && _repoLocal != null && Directory.Exists(Path.Combine(_repoLocal, ".git")))
                 {
                     var git = CreateGit();
                     var status = await git.GetStatusAsync();
@@ -1398,14 +1786,49 @@ namespace SsmsSharedQueries.UI
                 }
             }
             catch (Exception ex) { Diagnostics.Log.Write("RefreshState failed", ex); }
-            finally { _refreshing = false; }
 
             await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
             _submitCountTb.Text = count > 0 ? count.ToString() : string.Empty;
-            _submitBtn.IsEnabled = count > 0;
+            _changeCount = count;
+            RefreshActionButtons();
             _ahead = ahead; _behind = behind;
             UpdateRepoStatusText();
-            if (modified != null) { _modified = modified; if (newBase != null) _baseLines = newBase; RecolorModified(); RefreshMeta(); }
+            if (modified != null)
+            {
+                bool modifiedChanged = !_modified.SetEquals(modified);
+                bool contentFlipped = false;
+                if (Searching)
+                {
+                    // A modified (or just-reverted) file's body may now match/stop matching the search
+                    // even when the modified SET is unchanged (re-editing an already-modified file).
+                    // Re-read just those files, refresh their cached body-match, and note any flip.
+                    var affected = new HashSet<string>(_modified, StringComparer.OrdinalIgnoreCase);
+                    affected.UnionWith(modified);
+                    foreach (var rel in affected)
+                    {
+                        if (!rel.EndsWith(".sql", StringComparison.OrdinalIgnoreCase)) continue;
+                        bool wasHit = _contentHits.Contains(rel);
+                        bool nowHit = false;
+                        try
+                        {
+                            var full = Path.Combine(_repoLocal, rel.Replace('/', Path.DirectorySeparatorChar));
+                            if (File.Exists(full)) nowHit = SearchMatch.Contains(File.ReadAllText(full), _searchText);
+                        }
+                        catch (Exception ex) { Diagnostics.Log.Write("search re-eval: could not read " + rel, ex); }
+                        _bodyMatchCache[rel] = nowHit;
+                        if (wasHit != nowHit) contentFlipped = true;
+                    }
+                }
+                else
+                {
+                    foreach (var rel in _modified) _bodyMatchCache.Remove(rel);
+                    foreach (var rel in modified) _bodyMatchCache.Remove(rel);
+                }
+                _modified = modified;
+                if (newBase != null) _baseLines = newBase;
+                RecolorModified(); RefreshMeta();
+                if (Searching && (modifiedChanged || contentFlipped)) BuildTree(); // refresh filter + blue icons
+            }
         }
 
         // ---- helpers -------------------------------------------------------
@@ -1419,27 +1842,11 @@ namespace SsmsSharedQueries.UI
 
         private string CurrentUser() => string.IsNullOrWhiteSpace(_userName) ? Environment.UserName : _userName;
 
-        private static string ParseName(string identity)
-        {
-            if (string.IsNullOrWhiteSpace(identity)) return null;
-            var lt = identity.IndexOf(" <", StringComparison.Ordinal);
-            return lt > 0 ? identity.Substring(0, lt) : identity;
-        }
+        private static string ParseName(string identity) => GitIdentity.DisplayName(identity);
 
-        private static bool IsConflict(GitResult r)
-        {
-            var t = ((r?.StdErr ?? string.Empty) + (r?.StdOut ?? string.Empty)).ToLowerInvariant();
-            return t.Contains("conflict") || t.Contains("could not apply") || t.Contains("resolve all conflicts");
-        }
+        private static bool IsConflict(GitResult r) => GitResultClassifier.IsConflict(r?.StdErr, r?.StdOut);
 
-        private static string RepoName()
-        {
-            var url = (SharedQueriesPackage.Instance?.Options?.RepositoryUrl ?? string.Empty).TrimEnd('/');
-            if (url.Length == 0) return "repository";
-            var name = url.Substring(url.LastIndexOf('/') + 1);
-            if (name.EndsWith(".git", StringComparison.OrdinalIgnoreCase)) name = name.Substring(0, name.Length - 4);
-            return name.Length == 0 ? "repository" : name;
-        }
+        private static string RepoName() => GitUrl.RepoNameFromUrl(SharedQueriesPackage.Instance?.Options?.RepositoryUrl);
 
         private static string BranchName()
         {
@@ -1491,6 +1898,54 @@ namespace SsmsSharedQueries.UI
             return g;
         }
 
+        /// <summary>The first-run / not-configured overlay: a big soft pastel gear with a short
+        /// message and a link that opens the options page. Shown until a sync succeeds.</summary>
+        private Grid BuildEmptyState()
+        {
+            var overlay = new Grid { Background = SystemColors.WindowBrush }; // opaque: covers the empty tree
+            var col = new StackPanel
+            {
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                MaxWidth = 300,
+            };
+
+            _gearRotate = new RotateTransform(0);
+            col.Children.Add(new Viewbox
+            {
+                Width = 132,
+                Height = 132,
+                Opacity = 0.55,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                IsHitTestVisible = false,
+                Child = new ShapePath { Data = GeoGear, Fill = Frozen(0xC7, 0xD6, 0xEA), Stretch = Stretch.Uniform },
+                RenderTransformOrigin = new Point(0.5, 0.5), // spin around the centre while syncing
+                RenderTransform = _gearRotate,
+            });
+
+            _emptyTitle = new TextBlock
+            {
+                Text = "No repository configured",
+                FontSize = 15,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = TextBrush,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Margin = new Thickness(0, 14, 0, 4),
+            };
+            col.Children.Add(_emptyTitle);
+
+            _emptyMsg = new TextBlock { TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap, Foreground = MetaBrush };
+            _emptyMsg.Inlines.Add(new Run("Point the plugin at your git repository to start sharing queries. "));
+            var link = new System.Windows.Documents.Hyperlink(new Run("Set it up"));
+            link.Click += (s, e) => Guard("configure", () => SharedQueriesPackage.Instance?.ShowOptions());
+            _emptyMsg.Inlines.Add(link);
+            _emptyMsg.Inlines.Add(new Run("."));
+            col.Children.Add(_emptyMsg);
+
+            overlay.Children.Add(col);
+            return overlay;
+        }
+
         private static ShapePath Icon(Geometry geo, Brush fill, double size = 14) => new ShapePath
         {
             Data = geo,
@@ -1503,11 +1958,14 @@ namespace SsmsSharedQueries.UI
         };
 
         /// <summary>A white text-file icon (page outline + lines), font-independent.</summary>
-        private static UIElement FileIcon()
+        /// <summary>The file glyph. <paramref name="stroke"/> overrides the outline color (used to
+        /// tint the icon blue when the query matched on its contents); null keeps the default gray.</summary>
+        private static UIElement FileIcon(Brush stroke = null)
         {
+            var s = stroke ?? FileLineBrush;
             var g = new Grid { Width = 14, Height = 14 };
-            g.Children.Add(new ShapePath { Data = GeoFilePage, Fill = Brushes.White, Stroke = FileLineBrush, StrokeThickness = 1, Stretch = Stretch.None });
-            g.Children.Add(new ShapePath { Data = GeoFileLines, Stroke = FileLineBrush, StrokeThickness = 1, Stretch = Stretch.None });
+            g.Children.Add(new ShapePath { Data = GeoFilePage, Fill = Brushes.White, Stroke = s, StrokeThickness = 1, Stretch = Stretch.None });
+            g.Children.Add(new ShapePath { Data = GeoFileLines, Stroke = s, StrokeThickness = 1, Stretch = Stretch.None });
             return new Viewbox { Width = TreeIconSize, Height = TreeIconSize, Child = g, Stretch = Stretch.Uniform, Margin = new Thickness(0, 0, 5, 0), VerticalAlignment = VerticalAlignment.Center };
         }
 
@@ -1577,7 +2035,7 @@ namespace SsmsSharedQueries.UI
             var b = new Button { Content = content, ToolTip = tip };
             if (_flatStyle != null) b.Style = _flatStyle;
             else { b.Background = Brushes.Transparent; b.BorderThickness = new Thickness(0); b.Padding = new Thickness(4, 3, 4, 3); }
-            b.Click += onClick;
+            b.Click += (s, e) => Guard("button", () => onClick(s, e)); // never let a button handler crash SSMS
             return b;
         }
 
@@ -1627,6 +2085,43 @@ namespace SsmsSharedQueries.UI
         private static string SanitizeName(string name)
             => QueryPaths.SanitizeName(name);
 
+        /// <summary>
+        /// Last-resort safety net so a bug anywhere in the plugin's UI handlers can never take
+        /// down SSMS. We contain (log + status) only exceptions that originate in THIS plugin and
+        /// mark them handled; the host's own exceptions are left untouched to propagate as usual.
+        /// </summary>
+        private static void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
+        {
+            if (e.Exception == null || !IsFromThisPlugin(e.Exception)) return;
+            Diagnostics.Log.Write("Contained an unhandled plugin exception; SSMS kept running", e.Exception);
+            try { _current?.SetStatus("Something went wrong; the action was cancelled. See the log."); } catch { }
+            e.Handled = true;
+        }
+
+        private static bool IsFromThisPlugin(Exception ex)
+        {
+            for (var cur = ex; cur != null; cur = cur.InnerException)
+            {
+                if (cur.TargetSite?.DeclaringType?.FullName?.StartsWith("SsmsSharedQueries", StringComparison.Ordinal) == true)
+                    return true;
+                if (cur.StackTrace != null && cur.StackTrace.IndexOf("SsmsSharedQueries", StringComparison.Ordinal) >= 0)
+                    return true;
+            }
+            return false;
+        }
+
+        /// <summary>Run a synchronous UI event handler so a failure logs + shows status instead of
+        /// bubbling up. Belt-and-suspenders alongside <see cref="OnDispatcherUnhandledException"/>.</summary>
+        private void Guard(string what, Action body)
+        {
+            try { body(); }
+            catch (Exception ex)
+            {
+                Diagnostics.Log.Write("Handler failed: " + what, ex);
+                try { SetStatus($"Something went wrong ({what}). See the log."); } catch { }
+            }
+        }
+
         private void Run(string label, Func<Task> action)
         {
             Diagnostics.Log.Write($"Run start: {label}; Instance={(SharedQueriesPackage.Instance == null ? "NULL" : "set")}");
@@ -1652,9 +2147,34 @@ namespace SsmsSharedQueries.UI
             }).FileAndForget("SsmsSharedQueries/panel");
         }
 
+        /// <summary>True only when the repository is fully configured (URL, branch and cache path).
+        /// Without it there is nothing to Sync to or Submit against, so those actions are disabled.</summary>
+        private static bool HasConfig
+        {
+            get
+            {
+                var o = SharedQueriesPackage.Instance?.Options;
+                return o != null
+                    && !string.IsNullOrWhiteSpace(o.RepositoryUrl)
+                    && !string.IsNullOrWhiteSpace(o.Branch)
+                    && !string.IsNullOrWhiteSpace(o.LocalCachePath);
+            }
+        }
+
+        /// <summary>Enable/disable Sync and Submit from the current state. Sync needs a complete
+        /// config; Submit additionally needs a loaded repo with pending changes. The settings gear
+        /// is never disabled. Called whenever config, busy, loaded or the change count changes.</summary>
+        private void RefreshActionButtons()
+        {
+            bool cfg = HasConfig;
+            if (_syncBtn != null) _syncBtn.IsEnabled = cfg && !_busy;
+            if (_submitBtn != null) _submitBtn.IsEnabled = cfg && _loaded && !_busy && _changeCount > 0;
+        }
+
         private void SetActionsEnabled(bool enabled)
         {
-            _syncBtn.IsEnabled = enabled;
+            _busy = !enabled; // while an operation runs, its own trailing refresh is authoritative
+            RefreshActionButtons();
         }
 
         private void SetStatus(string text, bool history = true)
@@ -1738,6 +2258,24 @@ namespace SsmsSharedQueries.UI
             <Trigger Property='IsMouseOver' Value='True'>
               <Setter TargetName='bd' Property='Background' Value='#D8E6F2'/>
             </Trigger>
+            <Trigger Property='IsEnabled' Value='False'>
+              <Setter Property='Opacity' Value='0.4'/>
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+  <Style x:Key='FlatBtnNoHover' TargetType='Button'>
+    <Setter Property='Background' Value='Transparent'/>
+    <Setter Property='Cursor' Value='Hand'/>
+    <Setter Property='Template'>
+      <Setter.Value>
+        <ControlTemplate TargetType='Button'>
+          <Border Background='Transparent' Padding='2,0,2,0'>
+            <ContentPresenter HorizontalAlignment='Center' VerticalAlignment='Center'/>
+          </Border>
+          <ControlTemplate.Triggers>
             <Trigger Property='IsEnabled' Value='False'>
               <Setter Property='Opacity' Value='0.4'/>
             </Trigger>

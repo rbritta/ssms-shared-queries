@@ -8,6 +8,53 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 _No unreleased changes yet._
 
+## [1.1.0] - 2026-07-01
+
+### Added
+- **Search by name and contents.** A single search matches both file names and file bodies in
+  one pass (no mode to toggle) and runs automatically ~700 ms after you stop typing (Enter still
+  searches immediately). Name matching ignores separators, so `allt` finds `all-tables`, and the
+  matched span is highlighted in blue. Queries matched by their body get a blue file icon and a
+  "Matches file contents" tooltip. Each file is read at most once per search (cached per term).
+  The search box has an inline clear (X) and is disabled until a sync has loaded queries.
+- **Auto-sync, spinning-gear status, and setup prompt.** The panel syncs automatically when it
+  opens and reloads when you apply the repository settings. A slowly spinning gear with a
+  "Syncing..." caption shows while a sync runs. Until the repository is configured - or if a
+  sync fails - a friendly setup overlay (a link to the options) is shown instead of an error
+  dialog, with a message that matches the cause. **Sync**, **Submit** and search stay disabled
+  until the repository is configured and loaded.
+- **AI collaboration.** An auto-managed `CLAUDE.md` (plus an `AGENTS.md` mirror) is kept in the
+  queries folder, telling any AI assistant how to help with the shared queries: it may read,
+  comment, and improve `.sql` files locally, but it must never run git - the human reviews and
+  **Submits** through the plugin, so the commit history stays a per-person audit trail. The
+  guide is version-stamped and refreshed automatically when a newer plugin ships (the first
+  teammate to Submit shares the update); delete its first line to keep your own edits. Right-
+  click the repo node > **Edit AI rules** to open it. The markdown guides are hidden from the
+  `.sql`-only tree and appear as "AI rules (...)" in Submit. See `docs/AI-COLLABORATION.md`.
+- **Open in File Explorer** on any folder's right-click menu.
+
+### Fixed
+- **Discard folder changes** now also reverts a just-set folder **color** (or lock), which lives
+  in a brand-new, untracked `.ssq` file that `git checkout HEAD --` would leave behind. New
+  `.sql` queries are still kept.
+- **Clicking a highlighted search match no longer crashes SSMS.** Highlighted letters are text
+  `Run`s (not visuals); walking up from one to its tree row now handles that instead of throwing.
+- **A bug in the plugin can no longer take down the host.** Plugin exceptions in UI handlers are
+  contained and logged (the SSMS window stays up) instead of propagating.
+- **Search stays responsive and correct:** it no longer re-reads the whole library on every UI
+  action while a search is active, refresh requests coalesce instead of being dropped (no stale
+  Submit count / colors), and the blue content-match icon stays correct after you edit and save.
+- **Only one sync touches the repository at a time,** so applying settings mid-sync can no longer
+  race two git processes on the same working tree.
+- The local **operation history** is capped (most recent 500) instead of growing without bound.
+
+### Changed
+- Right-click menus regrouped: the destructive **Discard** is isolated from the read actions, and
+  **Edit AI rules** moved out of the "New..." cluster with verb-prefixed labels.
+- More of the logic is extracted into pure, unit-tested helpers (search matching, version compare,
+  repo-name / git-identity parsing, conflict and orphan-guide classification); the xUnit suite
+  grew from 70 to 155 tests, still run by a plain `dotnet test`.
+
 ## [1.0.0] - 2026-06-28
 
 First public release.
@@ -38,5 +85,6 @@ First public release.
 - Microsoft does not officially support third-party SSMS 21/22 extensions; install
   the prebuilt `.vsix` per-machine (see the README).
 
-[Unreleased]: https://github.com/rbritta/ssms-shared-queries/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/rbritta/ssms-shared-queries/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/rbritta/ssms-shared-queries/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/rbritta/ssms-shared-queries/releases/tag/v1.0.0

@@ -32,8 +32,12 @@
     <Compile Include="..\..\src\SsmsSharedQueries\Git\FileMeta.cs" Link="Linked\FileMeta.cs" />
     <Compile Include="..\..\src\SsmsSharedQueries\Git\GitStatusParser.cs" Link="Linked\GitStatusParser.cs" />
     <Compile Include="..\..\src\SsmsSharedQueries\Git\GitUrl.cs" Link="Linked\GitUrl.cs" />
+    <Compile Include="..\..\src\SsmsSharedQueries\Git\GitIdentity.cs" Link="Linked\GitIdentity.cs" />
+    <Compile Include="..\..\src\SsmsSharedQueries\Git\GitResultClassifier.cs" Link="Linked\GitResultClassifier.cs" />
     <Compile Include="..\..\src\SsmsSharedQueries\UI\QueryPaths.cs" Link="Linked\QueryPaths.cs" />
     <Compile Include="..\..\src\SsmsSharedQueries\UI\RowStatus.cs" Link="Linked\RowStatus.cs" />
+    <Compile Include="..\..\src\SsmsSharedQueries\UI\SearchMatch.cs" Link="Linked\SearchMatch.cs" />
+    <Compile Include="..\..\src\SsmsSharedQueries\UI\AiInstructions.cs" Link="Linked\AiInstructions.cs" />
     <Compile Include="..\..\src\SsmsSharedQueries\UI\FolderMeta.cs" Link="Linked\FolderMeta.cs" />
   </ItemGroup>
 

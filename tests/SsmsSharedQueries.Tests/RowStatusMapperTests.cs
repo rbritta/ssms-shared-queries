@@ -70,6 +70,43 @@ namespace SsmsSharedQueries.Tests
             Assert.Equal("queries/ops", row.Path);
         }
 
+        [Theory]
+        [InlineData("?? CLAUDE.md", "new", "AI rules (CLAUDE.md)")]
+        [InlineData(" M CLAUDE.md", "modified", "AI rules (CLAUDE.md)")]
+        [InlineData("?? AGENTS.md", "new", "AI rules (AGENTS.md)")]
+        public void Map_root_ai_guide_files_get_a_friendly_name(string line, string label, string path)
+        {
+            var row = RowStatusMapper.Map(line);
+            Assert.Equal(label, row.Label);
+            Assert.Equal(path, row.Path);
+        }
+
+        [Fact]
+        public void Map_ai_guide_in_a_subfolder_also_gets_the_friendly_name()
+        {
+            var row = RowStatusMapper.Map("?? Queries/CLAUDE.md");
+            Assert.Equal("new", row.Label);
+            Assert.Equal("AI rules (CLAUDE.md)", row.Path);
+        }
+
+        [Fact]
+        public void Map_deleted_ai_guide_gets_friendly_name()
+        {
+            // Orphan cleanup deletes stray guides, which then surface as deletions in Submit.
+            var row = RowStatusMapper.Map(" D CLAUDE.md");
+            Assert.Equal("deleted", row.Label);
+            Assert.Equal(RowKind.Deleted, row.Kind);
+            Assert.Equal("AI rules (CLAUDE.md)", row.Path);
+        }
+
+        [Fact]
+        public void Map_renamed_into_a_guide_name_gets_friendly_name()
+        {
+            var row = RowStatusMapper.Map("R  notes.md -> AGENTS.md");
+            Assert.Equal("renamed", row.Label);
+            Assert.Equal("AI rules (AGENTS.md)", row.Path);
+        }
+
         [Fact]
         public void Map_null_does_not_throw()
         {

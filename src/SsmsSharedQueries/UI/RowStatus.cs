@@ -48,6 +48,10 @@ namespace SsmsSharedQueries.UI
                     Path = shown,
                 };
             }
+            // The auto-managed AI guide files get a friendly name instead of a bare path.
+            var fileName = norm.Substring(norm.LastIndexOf('/') + 1);
+            if (AiInstructions.IsGuideFile(fileName)) shown = "AI rules (" + fileName + ")";
+
             if (isNew) return new RowStatus { Label = "new", Kind = RowKind.New, Path = shown };
             if (isDel) return new RowStatus { Label = "deleted", Kind = RowKind.Deleted, Path = shown };
             if (isRen) return new RowStatus { Label = "renamed", Kind = RowKind.Renamed, Path = shown };

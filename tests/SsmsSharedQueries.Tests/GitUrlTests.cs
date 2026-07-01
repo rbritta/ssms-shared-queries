@@ -69,5 +69,17 @@ namespace SsmsSharedQueries.Tests
         [Fact]
         public void RepoFolderName_handles_empty_url()
             => Assert.Matches("^repo-[0-9a-f]{8}$", GitUrl.RepoFolderName(""));
+
+        [Theory]
+        [InlineData("https://dev.azure.com/org/proj/_git/SqlScripts", "SqlScripts")]
+        [InlineData("https://github.com/rbritta/ssms-shared-queries.git", "ssms-shared-queries")]
+        [InlineData("https://github.com/o/Repo.git/", "Repo")]           // .git + trailing slash
+        [InlineData("git@github.com:org/Repo.git", "Repo")]              // ssh scp form with path
+        [InlineData("git@host:repo.git", "repo")]                        // ssh scp form, no path slash
+        [InlineData("", "repository")]                                    // empty -> fallback
+        [InlineData(null, "repository")]                                  // null -> fallback
+        [InlineData("https://host/.git", "repository")]                  // nameless -> fallback
+        public void RepoNameFromUrl_returns_the_display_name(string url, string expected)
+            => Assert.Equal(expected, GitUrl.RepoNameFromUrl(url));
     }
 }

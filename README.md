@@ -51,16 +51,18 @@ commit message:
 | | |
 |---|---|
 | **Object-Explorer-style tree** | Folders and `.sql` files, docked on the right, with `+`/`-` expanders. |
-| **Sync / Submit** | Pull the latest, or commit + push with a readable change list and a message. Conflicts get a plain keep-mine / take-theirs prompt. |
+| **Sync / Submit** | Pull the latest, or commit + push with a readable change list and a message. Conflicts get a plain keep-mine / take-theirs prompt. Syncs automatically on open and after you change settings; a spinning-gear "Syncing..." overlay shows while it runs, and a setup prompt (not an error) appears until it is configured. |
 | **Open & edit** | Double-click (or right-click > Open) to open a query in the SSMS editor; edits show red with a live line-count delta. |
 | **Insert at cursor** | Right-click > Insert into editor to drop a query at the cursor of the active window. |
-| **Search** | Filter the whole tree by file name and highlight the matched letters. |
+| **Search** | One search over file names and contents: name matches highlight the letters, content matches turn the file icon blue. Inline clear (X) in the box. |
 | **Favorites** | Per-user stars, grouped at the top. |
 | **Folder colors** | Shared via the repo and inherited by new subfolders. |
 | **Locks & deprecation** | Advisory locks and a strike-through "deprecated" mark, both shared with the team. |
 | **Drag-and-drop, rename, new** | Move files/folders, inline rename (F2), new file / new folder. |
 | **Safe Discard** | Throws away only the uncommitted part of a file; never deletes a submitted query. |
-| **Info & history** | Per-file creator / last author / recent commits, plus a local operation log. |
+| **Info & history** | Per-file creator / last author / recent commits, plus a capped local operation log. |
+| **Reveal** | Right-click a folder > _Open in File Explorer_. |
+| **AI collaboration** | An auto-managed `CLAUDE.md` (+ `AGENTS.md`) in the queries folder tells any AI assistant to improve queries locally while you stay the one who Submits. Right-click the repo node > _Edit AI rules_. See [docs/AI-COLLABORATION.md](docs/AI-COLLABORATION.md). |
 
 ## Quick start
 
@@ -191,7 +193,7 @@ NuGet, so the full VS extension workload is not required.
 
 ```powershell
 .\build.ps1                                  # -> src\SsmsSharedQueries\bin\Release\SsmsSharedQueries.vsix
-dotnet test tests\SsmsSharedQueries.Tests    # 70 unit tests
+dotnet test tests\SsmsSharedQueries.Tests    # 155 unit tests
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the version-bump and testing details, and

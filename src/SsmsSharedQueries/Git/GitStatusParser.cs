@@ -41,6 +41,30 @@ namespace SsmsSharedQueries.Git
             return list;
         }
 
+        /// <summary>
+        /// From the output of <c>git ls-files --others --exclude-standard</c> (one untracked,
+        /// non-ignored repo-relative path per line, always '/'-separated), return the paths
+        /// that are plugin metadata files - i.e. whose file name equals
+        /// <paramref name="metaFileName"/> (the hidden ".ssq"). Folder-discard uses this to
+        /// remove a just-added color/lock that lives in a brand-new (untracked) ".ssq", which
+        /// <c>git checkout HEAD --</c> leaves behind. Untracked queries (".sql") never match.
+        /// </summary>
+        public static List<string> FilterUntrackedMeta(string lsFilesOthersOutput, string metaFileName)
+        {
+            var list = new List<string>();
+            if (string.IsNullOrEmpty(lsFilesOthersOutput) || string.IsNullOrEmpty(metaFileName)) return list;
+            foreach (var raw in lsFilesOthersOutput.Split('\n'))
+            {
+                var p = raw.TrimEnd('\r').Trim().Trim('"');
+                if (p.Length == 0) continue;
+                var slash = p.LastIndexOf('/');
+                var name = slash >= 0 ? p.Substring(slash + 1) : p;
+                if (string.Equals(name, metaFileName, StringComparison.OrdinalIgnoreCase))
+                    list.Add(p);
+            }
+            return list;
+        }
+
         // "XY <path>"  ->  <path>  (and "<old> -> <new>" -> <new>), unquoted.
         private static string ExtractPath(string line)
         {

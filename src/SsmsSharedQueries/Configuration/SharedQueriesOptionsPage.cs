@@ -39,5 +39,14 @@ namespace SsmsSharedQueries.Configuration
             var root = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
             return Path.Combine(root, "SsmsSharedQueries", "repo");
         }
+
+        /// <summary>When the user accepts the page (OK/Apply), reload the panel with the new
+        /// settings, so changing or clearing the repository takes effect immediately.</summary>
+        protected override void OnApply(PageApplyEventArgs e)
+        {
+            base.OnApply(e);
+            if (e.ApplyBehavior == ApplyKind.Apply)
+                UI.QueryPanelControl.NotifySettingsChanged();
+        }
     }
 }
