@@ -8,6 +8,20 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 _No unreleased changes yet._
 
+## [1.1.2] - 2026-07-09
+
+### Fixed
+- Hidden dot-folders such as `.git`, `.github` and `.vs` are no longer shown in the tree. This
+  matters when the base directory is pointed at the repository root instead of a dedicated queries
+  subfolder. Dot-named files and folders are excluded consistently across the tree, the folder
+  content checks, and the color cascade, so a stray `.git` never counts as content or gets a
+  `.ssq` written into it.
+
+### Changed
+- The query scan prunes hidden dot-folders while walking instead of enumerating everything and
+  filtering afterwards, so reloading no longer traverses the entire `.git` object store when the
+  base directory is the repository root.
+
 ## [1.1.1] - 2026-07-01
 
 ### Fixed

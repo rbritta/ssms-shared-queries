@@ -50,5 +50,22 @@ namespace SsmsSharedQueries.UI
             return t.Equals(f, StringComparison.OrdinalIgnoreCase)
                 || t.StartsWith(f + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
         }
+
+        /// <summary>True for dot-prefixed names such as <c>.git</c>, <c>.github</c> or <c>.vs</c>.
+        /// These are tooling folders that must never appear in the tree, which matters when the
+        /// base directory is the repository root rather than a dedicated queries subfolder.</summary>
+        public static bool IsHiddenName(string name)
+            => !string.IsNullOrEmpty(name) && name[0] == '.';
+
+        /// <summary>True when any segment of <paramref name="relativePath"/> (split on either
+        /// slash) is a hidden, dot-prefixed name. Used to drop files that live under a folder such
+        /// as <c>.git</c> when walking the tree recursively.</summary>
+        public static bool HasHiddenSegment(string relativePath)
+        {
+            if (string.IsNullOrEmpty(relativePath)) return false;
+            foreach (var seg in relativePath.Split('/', '\\'))
+                if (IsHiddenName(seg)) return true;
+            return false;
+        }
     }
 }

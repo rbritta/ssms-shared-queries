@@ -619,7 +619,7 @@ namespace SsmsSharedQueries.UI
         private void DeleteFolder(string folderFull)
         {
             if (!EnsureSynced()) return;
-            bool hasContent = Directory.GetDirectories(folderFull).Length > 0
+            bool hasContent = VisibleSubdirs(folderFull).Length > 0
                               || Directory.GetFiles(folderFull, "*.sql").Length > 0;
             if (hasContent)
             {
@@ -653,13 +653,14 @@ namespace SsmsSharedQueries.UI
                 var hex = $"#{dlg.Color.R:X2}{dlg.Color.G:X2}{dlg.Color.B:X2}";
                 FolderMeta.WriteColor(folderFull, hex);
 
-                if (Directory.GetDirectories(folderFull).Length > 0)
+                if (VisibleSubdirs(folderFull).Length > 0)
                 {
                     var apply = System.Windows.MessageBox.Show("Apply this color to all subfolders too?",
                         "Folder color", MessageBoxButton.YesNo, MessageBoxImage.Question);
                     if (apply == MessageBoxResult.Yes)
                         foreach (var sub in Directory.GetDirectories(folderFull, "*", SearchOption.AllDirectories))
-                            FolderMeta.WriteColor(sub, hex);
+                            if (!QueryPaths.HasHiddenSegment(MakeRelative(folderFull, sub)))
+                                FolderMeta.WriteColor(sub, hex);
                 }
                 ReloadItems(); BuildTree(); RefreshStateFireAndForget();
                 SetStatus($"Set color {hex} on '{MakeRelative(_baseFull, folderFull)}'.");
@@ -670,13 +671,14 @@ namespace SsmsSharedQueries.UI
         {
             if (!EnsureSynced()) return;
             FolderMeta.WriteColor(folderFull, null);
-            if (Directory.GetDirectories(folderFull).Length > 0)
+            if (VisibleSubdirs(folderFull).Length > 0)
             {
                 var apply = System.Windows.MessageBox.Show("Reset the color on all subfolders too?",
                     "Reset folder color", MessageBoxButton.YesNo, MessageBoxImage.Question);
                 if (apply == MessageBoxResult.Yes)
                     foreach (var sub in Directory.GetDirectories(folderFull, "*", SearchOption.AllDirectories))
-                        FolderMeta.WriteColor(sub, null);
+                        if (!QueryPaths.HasHiddenSegment(MakeRelative(folderFull, sub)))
+                            FolderMeta.WriteColor(sub, null);
             }
             ReloadItems(); BuildTree(); RefreshStateFireAndForget();
             SetStatus($"Reset color on '{MakeRelative(_baseFull, folderFull)}'.");
@@ -1111,7 +1113,7 @@ namespace SsmsSharedQueries.UI
             var items = new List<QueryItem>();
             if (_baseFull != null && Directory.Exists(_baseFull))
             {
-                foreach (var f in Directory.GetFiles(_baseFull, "*.sql", SearchOption.AllDirectories).OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
+                foreach (var f in EnumerateVisibleSqlFiles(_baseFull).OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
                 {
                     items.Add(new QueryItem
                     {
@@ -1200,10 +1202,30 @@ namespace SsmsSharedQueries.UI
             _repoStatusTb.Text = parts.Count > 0 ? "  " + string.Join("  ", parts) : string.Empty;
         }
 
+        /// <summary>Direct subfolders of <paramref name="dirFull"/>, excluding hidden dot-folders
+        /// (.git, .github, .vs, ...) so they never leak into content checks or color cascades.</summary>
+        private static string[] VisibleSubdirs(string dirFull)
+            => Directory.GetDirectories(dirFull).Where(d => !QueryPaths.IsHiddenName(Path.GetFileName(d))).ToArray();
+
+        /// <summary>All *.sql files under <paramref name="dirFull"/>, pruning hidden dot-folders during
+        /// the walk (so it never descends into .git and friends) and skipping hidden dot-named files.
+        /// Pruning as we go avoids enumerating the entire .git object store when the base directory is
+        /// the repository root.</summary>
+        private static IEnumerable<string> EnumerateVisibleSqlFiles(string dirFull)
+        {
+            foreach (var f in Directory.GetFiles(dirFull, "*.sql"))
+                if (!QueryPaths.IsHiddenName(Path.GetFileName(f)))
+                    yield return f;
+            foreach (var sub in VisibleSubdirs(dirFull))
+                foreach (var f in EnumerateVisibleSqlFiles(sub))
+                    yield return f;
+        }
+
         private void AddDirectory(ItemsControl parent, string dirFull)
         {
             foreach (var sub in Directory.GetDirectories(dirFull).OrderBy(d => d, StringComparer.OrdinalIgnoreCase))
             {
+                if (QueryPaths.IsHiddenName(Path.GetFileName(sub))) continue; // never show .git and friends
                 if (Searching && !DirMatches(sub)) continue; // hide branches with no matching file
                 // Show the folder's OWN color, or the default yellow if it has none
                 // (inheritance happens at create time by writing into the child's .ssq).
@@ -1216,6 +1238,7 @@ namespace SsmsSharedQueries.UI
             var locks = FolderMeta.GetLocks(dirFull);
             foreach (var f in Directory.GetFiles(dirFull, "*.sql").OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
             {
+                if (QueryPaths.IsHiddenName(Path.GetFileName(f))) continue; // stay in sync with ReloadItems: dot-named files are hidden
                 var it = _items.FirstOrDefault(i => string.Equals(i.FullPath, f, StringComparison.OrdinalIgnoreCase))
                          ?? new QueryItem { FullPath = f, RelativePath = MakeRelative(_repoLocal, f), DisplayName = MakeRelative(_baseFull, f) };
                 if (Searching && !ItemMatches(it)) continue;
