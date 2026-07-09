@@ -8,6 +8,35 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 _No unreleased changes yet._
 
+## [1.2.0] - 2026-07-09
+
+### Added
+- **"Open containing folder"** on a query's right-click menu, opening File Explorer with the file
+  selected (mirrors the folder's "Open in File Explorer").
+- The panel caption now shows the version, e.g. **"SSMS Shared Queries 1.2.0"**, so an update is
+  visible at a glance.
+
+### Changed
+- **`.ssq` metadata files are now sparse.** A folder only gets a `.ssq` when it actually has
+  metadata (a color, a lock, or a deprecation), and the file is deleted as soon as it no longer
+  does - for example when you reset a folder's color. New folders no longer seed an empty `.ssq`,
+  so the repository is not littered with metadata files in every folder.
+- **Folder colors are inherited at read time.** A subfolder shows its parent's color without
+  carrying a `.ssq` of its own, and changing a parent's color now flows down to subfolders that do
+  not override it. Setting a color no longer offers to cascade it into every subfolder (inheritance
+  makes that unnecessary); reset a folder's color to let it inherit from its parent again.
+
+### Fixed
+- The Submit dialog no longer mislabels a metadata-only change: clearing a folder's last setting
+  reads as "folder settings" (the folder survives), and only a folder that is actually gone on disk
+  shows "deleted folder".
+- Setting a folder color opens the picker at the color currently shown (its own or inherited)
+  instead of black, so confirming without picking a color no longer writes a stray override.
+
+### Note
+- A brand-new, still-empty folder is only shareable once it contains at least one query, since git
+  does not track empty folders (previously an empty `.ssq` stood in for that).
+
 ## [1.1.2] - 2026-07-09
 
 ### Fixed

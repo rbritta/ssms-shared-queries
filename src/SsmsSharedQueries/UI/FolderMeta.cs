@@ -9,8 +9,10 @@ namespace SsmsSharedQueries.UI
     /// Per-folder metadata kept in a hidden ".ssq" file inside each folder (committed to
     /// the repo, so colors/preferences are shared with the team). Format is simple
     /// key=value lines, e.g. "color=#FF8800" or "lock=report.sql|alice", so it stays easy
-    /// to extend. Creating the file also gives an otherwise-empty folder something for git
-    /// to track.
+    /// to extend. A .ssq is written only when a folder actually has metadata and is deleted
+    /// once it no longer does, so folders without colors, locks or deprecations carry no file.
+    /// Color inheritance is resolved at read time (see <see cref="EffectiveColor"/>), so a
+    /// subfolder shows its parent's color without a .ssq of its own.
     /// </summary>
     internal static class FolderMeta
     {
@@ -22,12 +24,20 @@ namespace SsmsSharedQueries.UI
 
         /// <summary>
         /// Write the .ssq atomically (temp file + replace) so a concurrent reader never sees a
-        /// half-written file and two near-simultaneous edits cannot truncate each other.
+        /// half-written file and two near-simultaneous edits cannot truncate each other. When there
+        /// is nothing left to store the file is deleted instead of being left behind empty, so a .ssq
+        /// exists only while it holds real metadata.
         /// </summary>
         private static void WriteAllLinesAtomic(string path, IEnumerable<string> lines)
         {
+            var list = lines as IList<string> ?? lines.ToList();
+            if (list.Count == 0)
+            {
+                try { if (File.Exists(path)) File.Delete(path); } catch { }
+                return;
+            }
             var tmp = path + ".tmp";
-            File.WriteAllLines(tmp, lines);
+            File.WriteAllLines(tmp, list);
             if (File.Exists(path)) File.Replace(tmp, path, null);
             else File.Move(tmp, path);
         }
@@ -66,14 +76,30 @@ namespace SsmsSharedQueries.UI
             WriteAllLinesAtomic(f, lines);
         }
 
-        /// <summary>Create the .ssq file if missing, seeding it with an inherited color.</summary>
-        public static void EnsureFile(string folderPath, string inheritColor)
+        /// <summary>The effective color for <paramref name="folderPath"/>: its own "color=" line, or -
+        /// when it has none - the nearest ancestor's, walking up but never above <paramref name="stopAt"/>.
+        /// Resolving inheritance at read time lets a subfolder show its parent's color without carrying
+        /// a .ssq of its own.</summary>
+        public static string EffectiveColor(string folderPath, string stopAt)
         {
-            var f = Path.Combine(folderPath, FileName);
-            if (File.Exists(f)) return;
-            var lines = new List<string>();
-            if (!string.IsNullOrWhiteSpace(inheritColor)) lines.Add(ColorKey + inheritColor);
-            WriteAllLinesAtomic(f, lines);
+            if (string.IsNullOrEmpty(folderPath)) return null;
+            try
+            {
+                var dir = Path.GetFullPath(folderPath).TrimEnd(Path.DirectorySeparatorChar);
+                var stop = string.IsNullOrEmpty(stopAt) ? null
+                         : Path.GetFullPath(stopAt).TrimEnd(Path.DirectorySeparatorChar);
+                while (true)
+                {
+                    var c = ReadColor(dir);
+                    if (c != null) return c;
+                    if (stop == null || string.Equals(dir, stop, StringComparison.OrdinalIgnoreCase)) return null;
+                    if (!QueryPaths.IsSameOrDescendant(dir, stop)) return null; // never climb above the base
+                    var parent = Path.GetDirectoryName(dir);
+                    if (string.IsNullOrEmpty(parent)) return null;
+                    dir = parent.TrimEnd(Path.DirectorySeparatorChar);
+                }
+            }
+            catch { return null; }
         }
 
         // ---- locks: "lock=<fileName>|<user>" lines -------------------------

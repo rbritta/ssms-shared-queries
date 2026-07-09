@@ -143,7 +143,10 @@ namespace SsmsSharedQueries.Git
             if (!IsCloned) return list;
             // --untracked-files=all so files inside a brand-new folder are listed
             // individually (otherwise git collapses them to "folder/").
-            var r = await RunAsync("status --porcelain --untracked-files=all", _localPath, ct).ConfigureAwait(false);
+            // core.quotepath=false keeps non-ASCII paths (e.g. "Relatorios") as literal UTF-8 instead
+            // of octal-escaped, quoted strings, so callers see the real path (the Submit dialog's
+            // folder-existence probe needs it, and stdout is already decoded as UTF-8).
+            var r = await RunAsync("-c core.quotepath=false status --porcelain --untracked-files=all", _localPath, ct).ConfigureAwait(false);
             foreach (var raw in (r.StdOut ?? string.Empty).Split('\n'))
             {
                 var line = raw.TrimEnd('\r');

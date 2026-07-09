@@ -15,7 +15,9 @@ namespace SsmsSharedQueries
         public SharedQueriesToolWindow() : base(null)
         {
             Diagnostics.Log.Write("SharedQueriesToolWindow ctor");
-            Caption = "SSMS Shared Queries";
+            // Show the version in the panel caption (e.g. "SSMS Shared Queries 1.2.0") so an update is visible at a glance.
+            var v = typeof(SharedQueriesToolWindow).Assembly.GetName().Version;
+            Caption = $"SSMS Shared Queries {v.Major}.{v.Minor}.{v.Build}";
             // WPF control built entirely in code (no XAML) so the classic VSPackage
             // project doesn't need the WPF XAML build machinery.
             Content = new QueryPanelControl();

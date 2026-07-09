@@ -37,23 +37,78 @@ namespace SsmsSharedQueries.Tests
         }
 
         [Fact]
-        public void WriteColor_null_removes_the_color()
+        public void WriteColor_null_removes_the_color_and_deletes_the_empty_file()
         {
             FolderMeta.WriteColor(_dir, "#123456");
+            Assert.True(File.Exists(Path.Combine(_dir, FolderMeta.FileName)));
+
             FolderMeta.WriteColor(_dir, null);
             Assert.Null(FolderMeta.ReadColor(_dir));
+            // nothing left to store -> the .ssq should not linger empty
+            Assert.False(File.Exists(Path.Combine(_dir, FolderMeta.FileName)));
         }
 
         [Fact]
-        public void EnsureFile_seeds_inherited_color_only_when_present()
+        public void Removing_the_last_entry_deletes_the_file_but_other_metadata_keeps_it()
         {
-            var withColor = Sub("a");
-            FolderMeta.EnsureFile(withColor, "#0A0B0C");
-            Assert.Equal("#0A0B0C", FolderMeta.ReadColor(withColor));
+            var ssq = Path.Combine(_dir, FolderMeta.FileName);
 
-            var noColor = Sub("b");
-            FolderMeta.EnsureFile(noColor, null);
-            Assert.Null(FolderMeta.ReadColor(noColor));
+            FolderMeta.SetLock(_dir, "q.sql", "alice");
+            FolderMeta.WriteColor(_dir, "#abcdef");
+            Assert.True(File.Exists(ssq));
+
+            // removing the lock still leaves the color -> file stays
+            FolderMeta.RemoveLock(_dir, "q.sql");
+            Assert.True(File.Exists(ssq));
+
+            // removing the last remaining metadata (the color) deletes the file
+            FolderMeta.WriteColor(_dir, null);
+            Assert.False(File.Exists(ssq));
+        }
+
+        [Fact]
+        public void EffectiveColor_uses_own_color_when_present()
+        {
+            var a = Sub("a");
+            FolderMeta.WriteColor(a, "#111111");
+            Assert.Equal("#111111", FolderMeta.EffectiveColor(a, _dir));
+        }
+
+        [Fact]
+        public void EffectiveColor_inherits_from_nearest_ancestor()
+        {
+            FolderMeta.WriteColor(_dir, "#222222");         // base color
+            var mid = Sub("mid");
+            var leaf = Path.Combine(mid, "leaf");
+            Directory.CreateDirectory(leaf);
+
+            // neither mid nor leaf has its own .ssq -> both inherit the base color
+            Assert.Equal("#222222", FolderMeta.EffectiveColor(mid, _dir));
+            Assert.Equal("#222222", FolderMeta.EffectiveColor(leaf, _dir));
+
+            // a nearer ancestor overrides
+            FolderMeta.WriteColor(mid, "#333333");
+            Assert.Equal("#333333", FolderMeta.EffectiveColor(leaf, _dir));
+        }
+
+        [Fact]
+        public void EffectiveColor_never_climbs_above_the_stop_boundary()
+        {
+            FolderMeta.WriteColor(_dir, "#444444"); // color lives ABOVE the stop boundary
+            var baseDir = Sub("base");
+            var leaf = Path.Combine(baseDir, "leaf");
+            Directory.CreateDirectory(leaf);
+
+            // stop at baseDir: the walk must not reach _dir's color
+            Assert.Null(FolderMeta.EffectiveColor(leaf, baseDir));
+        }
+
+        [Fact]
+        public void EffectiveColor_is_null_when_no_color_anywhere()
+        {
+            var leaf = Path.Combine(Sub("x"), "y");
+            Directory.CreateDirectory(leaf);
+            Assert.Null(FolderMeta.EffectiveColor(leaf, _dir));
         }
 
         [Fact]

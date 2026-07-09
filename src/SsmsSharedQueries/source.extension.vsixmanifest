@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011" xmlns:d="http://schemas.microsoft.com/developer/vsx-schema-design/2011">
   <Metadata>
-    <Identity Id="SsmsSharedQueries.B50C448E-F6D4-49B3-8D15-CABE06BC75CB" Version="1.1.2" Language="en-US" Publisher="SSMS Shared Queries" />
+    <Identity Id="SsmsSharedQueries.B50C448E-F6D4-49B3-8D15-CABE06BC75CB" Version="1.2.0" Language="en-US" Publisher="SSMS Shared Queries" />
     <DisplayName>SSMS Shared Queries</DisplayName>
     <Description xml:space="preserve">Share and use a team library of SQL queries from a git repository, directly inside SSMS.</Description>
   </Metadata>

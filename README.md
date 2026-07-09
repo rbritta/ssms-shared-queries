@@ -56,7 +56,7 @@ commit message:
 | **Insert at cursor** | Right-click > Insert into editor to drop a query at the cursor of the active window. |
 | **Search** | One search over file names and contents: name matches highlight the letters, content matches turn the file icon blue. Inline clear (X) in the box. |
 | **Favorites** | Per-user stars, grouped at the top. |
-| **Folder colors** | Shared via the repo and inherited by new subfolders. |
+| **Folder colors** | Shared via the repo and inherited by subfolders (resolved at read time; override per folder to break inheritance). |
 | **Locks & deprecation** | Advisory locks and a strike-through "deprecated" mark, both shared with the team. |
 | **Drag-and-drop, rename, new** | Move files/folders, inline rename (F2), new file / new folder. |
 | **Safe Discard** | Throws away only the uncommitted part of a file; never deletes a submitted query. |

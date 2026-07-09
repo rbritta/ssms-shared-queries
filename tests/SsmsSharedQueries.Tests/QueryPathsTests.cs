@@ -98,20 +98,5 @@ namespace SsmsSharedQueries.Tests
             Assert.Equal(expected, QueryPaths.IsHiddenName(name));
         }
 
-        [Theory]
-        [InlineData(".git/config", true)]
-        [InlineData(".git\\hooks\\pre-commit", true)]
-        [InlineData("Queries/.git/x.sql", true)] // hidden segment anywhere in the path
-        [InlineData(".git", true)]                // bare hidden segment, no separator
-        [InlineData(".gitignore", true)]          // dotfile directly in the base
-        [InlineData(".hidden.sql", true)]         // dot-prefixed .sql at the base root
-        [InlineData("Queries/Create/a.sql", false)]
-        [InlineData("a.sql", false)]
-        [InlineData("", false)]
-        [InlineData(null, false)]
-        public void HasHiddenSegment_detects_dot_folder_anywhere(string rel, bool expected)
-        {
-            Assert.Equal(expected, QueryPaths.HasHiddenSegment(rel));
-        }
     }
 }

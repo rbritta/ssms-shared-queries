@@ -459,7 +459,7 @@ namespace SsmsSharedQueries.UI
             GitResult result;
             if (status.Count > 0)
             {
-                var dlg = new CommitDialog(status) { Owner = Window.GetWindow(this) };
+                var dlg = new CommitDialog(status, _repoLocal) { Owner = Window.GetWindow(this) };
                 if (dlg.ShowDialog() != true) { SetStatus("Submit cancelled."); return; }
                 SetStatus($"Committing {status.Count} change(s) and pushing...", history: false);
                 result = await git.CommitAndPushAsync(dlg.Message);
@@ -526,7 +526,8 @@ namespace SsmsSharedQueries.UI
             if (!EnsureSynced()) return;
             var path = UniquePath(parentFull, "New Folder", string.Empty);
             Directory.CreateDirectory(path);
-            FolderMeta.EnsureFile(path, FolderMeta.ReadColor(parentFull));
+            // No .ssq is seeded here: a new folder carries no metadata, and it inherits the parent's
+            // color at read time. A .ssq appears only once the folder gets its own color/lock/etc.
             ReloadItems(); BuildTree();
             var node = FindNodeByPath(path);
             if (node != null) BeginRename(node, isNew: true);
@@ -639,7 +640,7 @@ namespace SsmsSharedQueries.UI
             if (!EnsureSynced()) return;
             using (var dlg = new System.Windows.Forms.ColorDialog { FullOpen = true })
             {
-                var current = FolderMeta.ReadColor(folderFull);
+                var current = FolderMeta.EffectiveColor(folderFull, _baseFull); // open at the color shown (own or inherited), not black
                 if (current != null)
                 {
                     try
@@ -651,17 +652,18 @@ namespace SsmsSharedQueries.UI
                 }
                 if (dlg.ShowDialog() != System.Windows.Forms.DialogResult.OK) return;
                 var hex = $"#{dlg.Color.R:X2}{dlg.Color.G:X2}{dlg.Color.B:X2}";
-                FolderMeta.WriteColor(folderFull, hex);
-
-                if (VisibleSubdirs(folderFull).Length > 0)
+                // If the folder only INHERITS its color and the user confirmed that same color without
+                // changing it, don't pin an explicit override: that would create a .ssq in an otherwise
+                // file-free folder and stop it following its parent (defeating read-time inheritance).
+                bool hasOwnColor = FolderMeta.ReadColor(folderFull) != null;
+                if (!hasOwnColor && string.Equals(hex, current, StringComparison.OrdinalIgnoreCase))
                 {
-                    var apply = System.Windows.MessageBox.Show("Apply this color to all subfolders too?",
-                        "Folder color", MessageBoxButton.YesNo, MessageBoxImage.Question);
-                    if (apply == MessageBoxResult.Yes)
-                        foreach (var sub in Directory.GetDirectories(folderFull, "*", SearchOption.AllDirectories))
-                            if (!QueryPaths.HasHiddenSegment(MakeRelative(folderFull, sub)))
-                                FolderMeta.WriteColor(sub, hex);
+                    SetStatus($"'{MakeRelative(_baseFull, folderFull)}' keeps its inherited color.");
+                    return;
                 }
+                FolderMeta.WriteColor(folderFull, hex);
+                // Subfolders pick this up automatically through read-time inheritance (EffectiveColor),
+                // so there is no cascade to write - which also keeps a .ssq out of every descendant.
                 ReloadItems(); BuildTree(); RefreshStateFireAndForget();
                 SetStatus($"Set color {hex} on '{MakeRelative(_baseFull, folderFull)}'.");
             }
@@ -670,16 +672,9 @@ namespace SsmsSharedQueries.UI
         private void ResetFolderColor(string folderFull)
         {
             if (!EnsureSynced()) return;
-            FolderMeta.WriteColor(folderFull, null);
-            if (VisibleSubdirs(folderFull).Length > 0)
-            {
-                var apply = System.Windows.MessageBox.Show("Reset the color on all subfolders too?",
-                    "Reset folder color", MessageBoxButton.YesNo, MessageBoxImage.Question);
-                if (apply == MessageBoxResult.Yes)
-                    foreach (var sub in Directory.GetDirectories(folderFull, "*", SearchOption.AllDirectories))
-                        if (!QueryPaths.HasHiddenSegment(MakeRelative(folderFull, sub)))
-                            FolderMeta.WriteColor(sub, null);
-            }
+            FolderMeta.WriteColor(folderFull, null); // drops the color line; the .ssq is deleted if now empty
+            // The folder falls back to inheriting its parent's color; descendants with their own color
+            // keep it. Reset those individually if you want them to inherit too.
             ReloadItems(); BuildTree(); RefreshStateFireAndForget();
             SetStatus($"Reset color on '{MakeRelative(_baseFull, folderFull)}'.");
         }
@@ -879,7 +874,7 @@ namespace SsmsSharedQueries.UI
             var editName = isFolder ? fileName : Path.GetFileNameWithoutExtension(fileName);
             var tb = new TextBox { Text = editName, MinWidth = 120, Padding = new Thickness(1, 0, 1, 0), VerticalAlignment = VerticalAlignment.Center };
             var sp = new StackPanel { Orientation = Orientation.Horizontal };
-            sp.Children.Add(isFolder ? FolderIcon(ColorFromHex(FolderMeta.ReadColor(fullPath)) ?? DefaultFolderColor) : FileIcon());
+            sp.Children.Add(isFolder ? FolderIcon(ColorFromHex(FolderMeta.EffectiveColor(fullPath, _baseFull)) ?? DefaultFolderColor) : FileIcon());
             sp.Children.Add(tb);
             node.Header = sp;
 
@@ -1203,7 +1198,7 @@ namespace SsmsSharedQueries.UI
         }
 
         /// <summary>Direct subfolders of <paramref name="dirFull"/>, excluding hidden dot-folders
-        /// (.git, .github, .vs, ...) so they never leak into content checks or color cascades.</summary>
+        /// (.git, .github, .vs, ...) so they never leak into content checks or the SQL-file walk.</summary>
         private static string[] VisibleSubdirs(string dirFull)
             => Directory.GetDirectories(dirFull).Where(d => !QueryPaths.IsHiddenName(Path.GetFileName(d))).ToArray();
 
@@ -1227,9 +1222,9 @@ namespace SsmsSharedQueries.UI
             {
                 if (QueryPaths.IsHiddenName(Path.GetFileName(sub))) continue; // never show .git and friends
                 if (Searching && !DirMatches(sub)) continue; // hide branches with no matching file
-                // Show the folder's OWN color, or the default yellow if it has none
-                // (inheritance happens at create time by writing into the child's .ssq).
-                var node = MakeFolderNode(sub, Path.GetFileName(sub), FolderMeta.ReadColor(sub));
+                // Show the folder's effective color: its own, or the nearest ancestor's, resolved at
+                // read time so a subfolder inherits without needing a .ssq of its own.
+                var node = MakeFolderNode(sub, Path.GetFileName(sub), FolderMeta.EffectiveColor(sub, _baseFull));
                 if (Searching) node.IsExpanded = true; // reveal matches (guarded: doesn't touch saved state)
                 parent.Items.Add(node);
                 AddDirectory(node, sub);
@@ -1358,11 +1353,14 @@ namespace SsmsSharedQueries.UI
             var del = new MenuItem { Header = "Delete", IsEnabled = !locked };
             del.Click += (s, e) => DeleteFile(it);
             menu.Items.Add(del);
-            // -- info --
+            // -- info / reveal --
             menu.Items.Add(new Separator());
             var info = new MenuItem { Header = "Info" };
             info.Click += (s, e) => ShowFileInfo(it);
             menu.Items.Add(info);
+            var reveal = new MenuItem { Header = "Open containing folder" };
+            reveal.Click += (s, e) => OpenContainingFolder(it);
+            menu.Items.Add(reveal);
             // keep Discard's enabled state correct even if _modified changed since the tree was built
             menu.Opened += (s, e) =>
             {
@@ -1450,6 +1448,17 @@ namespace SsmsSharedQueries.UI
                 System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", $"\"{folderFull}\"") { UseShellExecute = true });
             }
             catch (Exception ex) { Diagnostics.Log.Write("OpenInExplorer failed", ex); SetStatus("Could not open the folder: " + ex.Message); }
+        }
+
+        /// <summary>Open the query's containing folder in Explorer with the file itself selected.</summary>
+        private void OpenContainingFolder(QueryItem it)
+        {
+            try
+            {
+                if (!File.Exists(it.FullPath)) { SetStatus($"'{it.DisplayName}' no longer exists - Sync first."); return; }
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", $"/select,\"{it.FullPath}\"") { UseShellExecute = true });
+            }
+            catch (Exception ex) { Diagnostics.Log.Write("OpenContainingFolder failed", ex); SetStatus("Could not open the folder: " + ex.Message); }
         }
 
         private void RecolorModified()

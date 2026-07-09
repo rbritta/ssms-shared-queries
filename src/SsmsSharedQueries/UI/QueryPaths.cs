@@ -56,16 +56,5 @@ namespace SsmsSharedQueries.UI
         /// base directory is the repository root rather than a dedicated queries subfolder.</summary>
         public static bool IsHiddenName(string name)
             => !string.IsNullOrEmpty(name) && name[0] == '.';
-
-        /// <summary>True when any segment of <paramref name="relativePath"/> (split on either
-        /// slash) is a hidden, dot-prefixed name. Used to drop files that live under a folder such
-        /// as <c>.git</c> when walking the tree recursively.</summary>
-        public static bool HasHiddenSegment(string relativePath)
-        {
-            if (string.IsNullOrEmpty(relativePath)) return false;
-            foreach (var seg in relativePath.Split('/', '\\'))
-                if (IsHiddenName(seg)) return true;
-            return false;
-        }
     }
 }

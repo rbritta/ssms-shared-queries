@@ -1,4 +1,6 @@
+using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -23,8 +25,11 @@ namespace SsmsSharedQueries.UI
 
         public string Message => _message.Text.Trim();
 
-        public CommitDialog(IEnumerable<string> files)
+        private readonly string _repoRoot;
+
+        public CommitDialog(IEnumerable<string> files, string repoRoot = null)
         {
+            _repoRoot = repoRoot;
             Title = "Submit changes";
             SizeToContent = SizeToContent.Height;
             Width = 520;
@@ -69,12 +74,16 @@ namespace SsmsSharedQueries.UI
 
         /// <summary>
         /// Render one porcelain status line as a readable row: a colored word
-        /// (new / modified / deleted / renamed, or "new folder" for the hidden .ssq marker)
-        /// followed by the path. The mapping itself lives in <see cref="RowStatusMapper"/>.
+        /// (new / modified / deleted / renamed, or "folder settings" for the hidden .ssq marker)
+        /// followed by the path. The mapping itself lives in <see cref="RowStatusMapper"/>; the repo
+        /// root lets it tell a folder deletion from a mere metadata clear.
         /// </summary>
-        private static UIElement MakeRow(string porcelain)
+        private UIElement MakeRow(string porcelain)
         {
-            var row = RowStatusMapper.Map(porcelain);
+            Func<string, bool> folderExists = _repoRoot == null
+                ? (Func<string, bool>)null
+                : rel => Directory.Exists(Path.Combine(_repoRoot, rel.Replace('/', Path.DirectorySeparatorChar)));
+            var row = RowStatusMapper.Map(porcelain, folderExists);
             Brush color = row.Kind == RowKind.New ? NewBrush
                         : row.Kind == RowKind.Deleted ? DelBrush
                         : row.Kind == RowKind.Renamed ? RenBrush
