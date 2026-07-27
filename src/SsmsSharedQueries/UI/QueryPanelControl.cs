@@ -514,9 +514,26 @@ namespace SsmsSharedQueries.UI
                 System.Windows.MessageBox.Show(result.ToString(), "SSMS Shared Queries - submit failed",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
+            // Submitting rewrote the local history (the new commit, plus whatever the rebase pulled
+            // in), so the history the tree shows is now stale: a just-submitted query would keep
+            // reading "new" and stay un-lockable, and an edited one would still credit the previous
+            // author. Refresh it here so the panel reflects the submission at once, with no Sync.
+            await RefreshHistoryAsync(git);
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
             ReloadItems();
             BuildTree();
             await RefreshStateAsync();
+        }
+
+        /// <summary>Re-read the per-file history (last author/date, and whether the file exists in
+        /// the history at all) after the local git history changed. Never throws: the operation that
+        /// changed the history already succeeded, so a failed refresh only logs and keeps the
+        /// previous map, which the next Sync replaces.</summary>
+        private async Task RefreshHistoryAsync(GitService git)
+        {
+            if (!_loaded || git == null) return;
+            try { _historyMap = await git.GetHistoryMapAsync(); }
+            catch (Exception ex) { Diagnostics.Log.Write("history refresh failed", ex); }
         }
 
         // ---- folder / file management --------------------------------------

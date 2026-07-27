@@ -8,6 +8,13 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 _No unreleased changes yet._
 
+## [1.2.1] - 2026-07-27
+
+### Fixed
+- The panel now refreshes itself right after a Submit. A query you just submitted used to keep
+  reading "new" (with Lock and Mark deprecated greyed out), and an edited one kept crediting the
+  previous author, until you clicked Sync; the tree now shows the submitted state immediately.
+
 ## [1.2.0] - 2026-07-09
 
 ### Added
