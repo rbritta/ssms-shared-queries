@@ -47,7 +47,7 @@ jobs:
         run: ./tools/coverage-summary.ps1 -Path TestResults
 
       - name: Upload VSIX artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: SsmsSharedQueries-vsix
           path: src/SsmsSharedQueries/bin/Release/SsmsSharedQueries.vsix
