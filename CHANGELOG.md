@@ -6,6 +6,10 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- Dependabot's NuGet check failed on every run: it reads the project before a restore, on Linux, where the VS SDK
+  build targets do not exist yet, and the project imported them unconditionally. The import now waits for the file.
+
 ## [1.2.2] - 2026-11-14
 
 ### Fixed
