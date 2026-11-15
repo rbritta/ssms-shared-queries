@@ -1,0 +1,16 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: nuget
+    directory: /
+    schedule:
+      interval: weekly
+    ignore:
+      # The VS SDK follows the shell SSMS ships on: a new major is a deliberate upgrade, not a weekly bump.
+      - dependency-name: Microsoft.VisualStudio.SDK
+        update-types: [version-update:semver-major]
+      - dependency-name: Microsoft.VSSDK.BuildTools
+        update-types: [version-update:semver-major]

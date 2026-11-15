@@ -15,7 +15,7 @@ namespace SsmsSharedQueries
     /// the "Tools > SSMS Shared Queries" command, and the options page.
     /// </summary>
     [PackageRegistration(UseManagedResourcesOnly = true, AllowsBackgroundLoading = true)]
-    [InstalledProductRegistration("SSMS Shared Queries", "Team library of SQL queries, backed by a git repository.", "1.0.0")]
+    [InstalledProductRegistration("SSMS Shared Queries", "Team library of SQL queries, backed by a git repository.", "1.2.2")]
     [ProvideMenuResource("Menus.ctmenu", 1)]
     [ProvideToolWindow(typeof(SharedQueriesToolWindow),
         Style = VsDockStyle.Tabbed,

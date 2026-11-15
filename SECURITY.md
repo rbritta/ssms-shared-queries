@@ -1,5 +1,14 @@
 # Security
 
+## Supported versions
+
+Only the latest minor release gets fixes.
+
+| Version | Supported |
+|---|---|
+| 1.2.x | yes |
+| older | no |
+
 ## Trust model
 
 - The extension shells out to whatever **`git.exe`** is first on the `PATH`, and
@@ -18,6 +27,6 @@
 
 ## Reporting a vulnerability
 
-Please report suspected vulnerabilities privately via a
-[GitHub security advisory](https://github.com/rbritta/ssms-shared-queries/security/advisories/new)
+Please report suspected vulnerabilities privately through
+[GitHub private vulnerability reporting](https://github.com/rbritta/ssms-shared-queries/security/advisories/new)
 rather than a public issue. You can expect an initial response within a few days.

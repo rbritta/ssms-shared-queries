@@ -1,19 +1,25 @@
-<div align="center">
-
-<img src="docs/logo.png" width="120" alt="SSMS Shared Queries logo" />
-
 # SSMS Shared Queries
 
-**A shared, git-backed library of SQL queries, right inside SQL Server Management Studio.**
+<img src="docs/logo.png" width="96" align="right" alt="SSMS Shared Queries logo" />
 
-[![build](https://github.com/rbritta/ssms-shared-queries/actions/workflows/build.yml/badge.svg)](https://github.com/rbritta/ssms-shared-queries/actions/workflows/build.yml)
+A shared, git-backed library of SQL queries, right inside SQL Server Management Studio: a panel docked next to Object
+Explorer where a team browses, opens, edits and submits its queries, with git doing the versioning out of sight. For
+teams whose best queries live scattered across desktops and chat history.
+
+[![CI](https://github.com/rbritta/ssms-shared-queries/actions/workflows/ci.yml/badge.svg)](https://github.com/rbritta/ssms-shared-queries/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/rbritta/ssms-shared-queries?sort=semver&color=4f8ac0)](https://github.com/rbritta/ssms-shared-queries/releases/latest)
-[![downloads](https://img.shields.io/github/downloads/rbritta/ssms-shared-queries/total?color=4ca54c)](https://github.com/rbritta/ssms-shared-queries/releases)
 [![license: MIT](https://img.shields.io/badge/license-MIT-e8b74e.svg)](LICENSE)
+
+<div align="center">
+
+<img src="docs/panel.png" width="560" alt="The SSMS Shared Queries panel docked in SSMS: colored folders, a struck-through deprecated query, a locked query, per-file authors and live line counts, and the Sync / Submit toolbar." />
 
 </div>
 
----
+[Install](#install) · [Quick start](#quick-start) · [Features](#features) · [How it works](#how-it-works) ·
+[For AI agents](AGENTS.md) · [Roadmap](TODO.md)
+
+## What it does
 
 Your team's best queries usually live scattered across desktops, chat history, and
 one teammate's `Documents\SQL` folder. **SSMS Shared Queries** turns them into a
@@ -22,19 +28,11 @@ an ordinary **git repository**, but git is **invisible**: the panel clones, pull
 commits, and pushes for you. Every change is recorded **in its author's name**, so
 the history doubles as a per-person audit trail.
 
-## What it looks like
-
-<div align="center">
-
-<img src="docs/panel.png" width="560" alt="The SSMS Shared Queries panel docked in SSMS: colored folders, a struck-through deprecated query, a locked query, per-file authors and live line counts, and the Sync / Submit toolbar." />
-
-</div>
-
-Folders carry team-shared colors; a new or moved query shows in red with a live
+In the panel above, folders carry team-shared colors; a new or moved query shows in red with a live
 line count; locked queries show a padlock and "locked by ..."; deprecated queries
 are struck through; and each file shows its last author from git. The toolbar's
 **Sync** pulls the latest and **Submit** (with its pending-change count) commits and
-pushes in your name. The panel above shows a small sample query library.
+pushes in your name. The panel shows a small sample query library.
 
 **Submit** lists exactly what will change in plain language - color-coded
 new / modified / deleted / renamed, with whole folders rolled up - then asks for a
@@ -46,7 +44,7 @@ commit message:
 
 </div>
 
-## Features
+### Features
 
 | | |
 |---|---|
@@ -61,19 +59,44 @@ commit message:
 | **Drag-and-drop, rename, new** | Move files/folders, inline rename (F2), new file / new folder. |
 | **Safe Discard** | Throws away only the uncommitted part of a file; never deletes a submitted query. |
 | **Info & history** | Per-file creator / last author / recent commits, plus a capped local operation log. |
-| **Reveal** | Right-click a folder > _Open in File Explorer_. |
+| **Reveal** | Right-click a folder > _Open in File Explorer_; right-click a query > _Open containing folder_. |
 | **AI collaboration** | An auto-managed `CLAUDE.md` (+ `AGENTS.md`) in the queries folder tells any AI assistant to improve queries locally while you stay the one who Submits. Right-click the repo node > _Edit AI rules_. See [docs/AI-COLLABORATION.md](docs/AI-COLLABORATION.md). |
 
-## Quick start
+## Install
 
-**1. Install** (PowerShell, no clone or build needed - downloads the latest release and installs per-machine):
+**One command** (PowerShell, no clone or build needed - downloads the latest release and installs per-machine):
 
 ```powershell
 irm https://raw.githubusercontent.com/rbritta/ssms-shared-queries/main/install.ps1 -OutFile "$env:TEMP\sq.ps1"; & "$env:TEMP\sq.ps1"
 ```
 
-It self-elevates for the one-time copy, then registers the extension. (Prefer to do
-it by hand? See [Install](#install) below.)
+It self-elevates for the one-time copy, then registers the extension.
+
+**By hand:**
+
+1. Download `SsmsSharedQueries.vsix` from [Releases](https://github.com/rbritta/ssms-shared-queries/releases/latest).
+2. Close SSMS.
+3. Run `.\install.ps1` from a clone (it uses your local build if present, otherwise
+   downloads the latest release), **or** copy the extracted VSIX into
+   `...\Microsoft SQL Server Management Studio 22\Release\Common7\IDE\Extensions\`
+   and run `SSMS.exe /updateconfiguration`.
+4. Start SSMS and open **Tools > SSMS Shared Queries**.
+
+<details>
+<summary>Why per-machine (not per-user)?</summary>
+
+SSMS 22 only merges the `pkgdef` of extensions installed under the **product
+folder**. An extension dropped in the per-user folder
+(`%LocalAppData%\Microsoft\SSMS\<ver>\Extensions\`) is listed in the catalog but its
+`pkgdef` is never merged, so the package never registers (no Options page, no menu,
+it never loads). Installing per-machine + `/updateconfiguration` is what makes it
+load.
+
+</details>
+
+## Quick start
+
+**1. Install** it (above).
 
 **2. Point it at a repo:** start SSMS, open **Tools > Options > SSMS Shared Queries**,
 and set the *Repository URL* (HTTPS), *Branch* (default `main`), and *Queries folder*
@@ -116,7 +139,7 @@ and set the *Repository URL* (HTTPS), *Branch* (default `main`), and *Queries fo
   any query, and Submit pushes straight to the shared branch - there is no review
   gate by default. The git history (in each author's name) is both the audit trail
   and the undo: nothing is truly lost, but treat the library as a trusted-team
-  space. A protected-branch / Pull Request flow is on the roadmap.
+  space. A protected-branch / Pull Request flow is on the [roadmap](TODO.md).
 - **Locks are advisory.** A lock disables Open / Rename / Delete / move in the UI
   and signals "I am working on this". It does not stop someone editing through git
   directly, and anyone can unlock. It is etiquette, not enforcement.
@@ -132,30 +155,6 @@ and set the *Repository URL* (HTTPS), *Branch* (default `main`), and *Queries fo
 > break on an SSMS update. For a regulated or B2B context, get security/compliance
 > sign-off before adopting it. This is not legal or compliance advice.
 
-## Install
-
-The quick-start one-liner is the easy path. To do it by hand:
-
-1. Download `SsmsSharedQueries.vsix` from [Releases](https://github.com/rbritta/ssms-shared-queries/releases/latest).
-2. Close SSMS.
-3. Run `.\install.ps1` from a clone (it uses your local build if present, otherwise
-   downloads the latest release), **or** copy the extracted VSIX into
-   `...\Microsoft SQL Server Management Studio 22\Release\Common7\IDE\Extensions\`
-   and run `SSMS.exe /updateconfiguration`.
-4. Start SSMS and open **Tools > SSMS Shared Queries**.
-
-<details>
-<summary>Why per-machine (not per-user)?</summary>
-
-SSMS 22 only merges the `pkgdef` of extensions installed under the **product
-folder**. An extension dropped in the per-user folder
-(`%LocalAppData%\Microsoft\SSMS\<ver>\Extensions\`) is listed in the catalog but its
-`pkgdef` is never merged, so the package never registers (no Options page, no menu,
-it never loads). Installing per-machine + `/updateconfiguration` is what makes it
-load.
-
-</details>
-
 ## Distribution and updates
 
 There is no official Microsoft marketplace for SSMS extensions (they are
@@ -163,8 +162,9 @@ unsupported, and the Visual Studio Marketplace targets Visual Studio, not SSMS).
 this project ships the way capable SSMS tools do:
 
 - **GitHub Releases** - every `vX.Y.Z` tag is built by CI and published with the
-  `.vsix` attached. This is the source of truth.
-- **One-command install** - the quick-start line downloads that release and installs
+  `.vsix` attached and the CHANGELOG section of that version as its notes. This is
+  the source of truth.
+- **One-command install** - the install line downloads that release and installs
   it, so end users never clone or build.
 - **Private gallery (optional, for teams)** - Visual-Studio-shell tools can also be
   served from a self-hosted *extension gallery* (an Atom feed, hostable on GitHub
@@ -185,21 +185,24 @@ queries/
     daily_health_check.sql
 ```
 
-## Build from source
+## Develop
 
 Contributors need [VS Build Tools 2022](https://visualstudio.microsoft.com/downloads/)
-with the *.NET desktop build tools* workload. The VSIX build targets come from
-NuGet, so the full VS extension workload is not required.
+with the *.NET desktop build tools* workload and the .NET 8 SDK. The VSIX build targets
+come from NuGet, so the full VS extension workload is not required.
 
 ```powershell
+git clone https://github.com/rbritta/ssms-shared-queries
+cd ssms-shared-queries
 .\build.ps1                                  # -> src\SsmsSharedQueries\bin\Release\SsmsSharedQueries.vsix
-dotnet test tests\SsmsSharedQueries.Tests    # 155 unit tests
+dotnet test tests\SsmsSharedQueries.Tests    # 192 unit tests
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the version-bump and testing details, and
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the pieces fit together.
-
-## Project layout
+CI builds the VSIX and runs the tests on Windows for every push and pull request, with a
+coverage summary of the unit-tested code in the job log. There is no live demo: the panel
+runs inside SSMS, so the screenshots above (all of the real panel, on a sample library)
+are the tour. See [CONTRIBUTING.md](CONTRIBUTING.md) for the version-bump and testing
+details, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the pieces fit together.
 
 ```text
 SsmsSharedQueries.sln
@@ -213,14 +216,8 @@ src/SsmsSharedQueries/             classic VSPackage, net472, amd64
   Git/GitStatusParser.cs             pure porcelain/log parsing (unit-tested)
   Editor/SqlEditorService.cs         read/insert into the active SQL editor
 tests/SsmsSharedQueries.Tests/     xUnit, links the pure logic (no VS SDK)
+tools/                             release notes and coverage summary for CI
 ```
-
-## Roadmap
-
-- Split the WPF panel into smaller collaborators (the parsing / path / row logic is
-  already extracted and tested).
-- Per-host identity bootstrap (set `user.name` / `user.email` on first Sync).
-- Optional protected-branch / Pull Request mode for governed environments.
 
 ## Contributing
 
@@ -230,4 +227,4 @@ and the [Code of Conduct](CODE_OF_CONDUCT.md) first. Found a security issue? See
 
 ## License
 
-[MIT](LICENSE) (c) 2026 SSMS Shared Queries contributors.
+[MIT](LICENSE)

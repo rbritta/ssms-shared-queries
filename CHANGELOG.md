@@ -6,7 +6,26 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-_No unreleased changes yet._
+## [1.2.2] - 2026-11-14
+
+### Fixed
+- The package registration (`InstalledProductRegistration`, what the IDE's About box lists) still said version
+  1.0.0. It now carries the release version, and a test checks that the assembly, the VSIX manifest, the
+  registration and this file agree on it.
+
+### Added
+- The GitHub Release notes are this file's section for the tagged version (`tools/release-notes.ps1`, which refuses
+  a tag that does not name the version in the manifest), with tests.
+- CI prints a coverage summary of the unit-tested code in the job log.
+- AGENTS.md (for AI coding agents), TODO.md (the roadmap), issue forms and a weekly Dependabot check of the
+  workflows and the test project's packages.
+
+### Changed
+- CI runs on every push and pull request with a read-only token, and a newer push cancels the run it replaces.
+- The README follows the shape of the author's other projects (badges, a link line, how to develop) and states the
+  real test count; the roadmap moved to TODO.md.
+- Line endings are LF in the repository, as in the author's other projects; PowerShell scripts and the solution file
+  stay CRLF.
 
 ## [1.2.1] - 2026-07-27
 
@@ -143,7 +162,11 @@ First public release.
 - Microsoft does not officially support third-party SSMS 21/22 extensions; install
   the prebuilt `.vsix` per-machine (see the README).
 
-[Unreleased]: https://github.com/rbritta/ssms-shared-queries/compare/v1.1.1...HEAD
+[Unreleased]: https://github.com/rbritta/ssms-shared-queries/compare/v1.2.2...HEAD
+[1.2.2]: https://github.com/rbritta/ssms-shared-queries/compare/v1.2.1...v1.2.2
+[1.2.1]: https://github.com/rbritta/ssms-shared-queries/compare/v1.2.0...v1.2.1
+[1.2.0]: https://github.com/rbritta/ssms-shared-queries/compare/v1.1.2...v1.2.0
+[1.1.2]: https://github.com/rbritta/ssms-shared-queries/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/rbritta/ssms-shared-queries/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/rbritta/ssms-shared-queries/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/rbritta/ssms-shared-queries/releases/tag/v1.0.0

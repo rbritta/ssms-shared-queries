@@ -1,11 +1,17 @@
-name: build
+name: CI
 
+# Windows only: the VSIX is a classic net472 VSPackage for SSMS, built with the desktop MSBuild.
 on:
   push:
-    branches: [ main ]
   pull_request:
-    branches: [ main ]
   workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -13,6 +19,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Add MSBuild to PATH
         uses: microsoft/setup-msbuild@v2
@@ -21,17 +29,22 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
+          # no NuGet cache: setup-dotnet caches from packages.lock.json files, which this repo does not keep
 
-      # The VSIX build targets come from the Microsoft.VSSDK.BuildTools NuGet
-      # package, so a plain runner (no VS extension workload) can build it.
+      # The VSIX build targets come from the Microsoft.VSSDK.BuildTools
+      # NuGet package, so a plain runner (no VS extension workload) can build it.
       - name: Restore (extension)
         run: msbuild src/SsmsSharedQueries/SsmsSharedQueries.csproj /t:Restore /p:Configuration=Release /v:minimal /nologo
 
       - name: Build VSIX
         run: msbuild src/SsmsSharedQueries/SsmsSharedQueries.csproj /p:Configuration=Release /p:DeployExtension=false /v:minimal /nologo
 
-      - name: Test
-        run: dotnet test tests/SsmsSharedQueries.Tests/SsmsSharedQueries.Tests.csproj -c Release --verbosity normal
+      - name: Test with coverage
+        run: dotnet test tests/SsmsSharedQueries.Tests/SsmsSharedQueries.Tests.csproj -c Release --verbosity normal --collect "Code Coverage;Format=cobertura" --results-directory TestResults
+
+      - name: Coverage summary
+        shell: pwsh
+        run: ./tools/coverage-summary.ps1 -Path TestResults
 
       - name: Upload VSIX artifact
         uses: actions/upload-artifact@v4

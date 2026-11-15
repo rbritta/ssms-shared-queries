@@ -1,6 +1,7 @@
 name: release
 
-# Tag a commit `vX.Y.Z` to build the VSIX and publish it as a GitHub Release.
+# Tag a commit `vX.Y.Z` (the version in source.extension.vsixmanifest) to build the VSIX and publish it as a GitHub
+# Release whose notes are the CHANGELOG section of that version.
 on:
   push:
     tags: [ 'v*' ]
@@ -14,6 +15,16 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Release notes (the tag must name the version)
+        shell: pwsh
+        run: |
+          ./tools/release-notes.ps1 -Tag $env:GITHUB_REF_NAME -OutFile release-notes.md
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          $footer = "`n---`n`nDownload ``SsmsSharedQueries.vsix`` below.`n`nNote: Microsoft does not officially support third-party extensions in SSMS 21/22, so install per-machine and see the README for details.`n"
+          [IO.File]::AppendAllText("$PWD/release-notes.md", $footer)
 
       - name: Add MSBuild to PATH
         uses: microsoft/setup-msbuild@v2
@@ -36,9 +47,4 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: src/SsmsSharedQueries/bin/Release/SsmsSharedQueries.vsix
-          generate_release_notes: true
-          body: |
-            Download `SsmsSharedQueries.vsix` below.
-
-            Note: Microsoft does not officially support third-party extensions in
-            SSMS 21/22, so install per-machine and see the README for details.
+          body_path: release-notes.md

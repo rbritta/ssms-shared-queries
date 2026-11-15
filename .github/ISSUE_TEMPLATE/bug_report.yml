@@ -1,0 +1,41 @@
+name: Bug report
+description: Something does not work the way the README says it does.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time. Please search the open issues first. A security problem goes through [SECURITY.md](https://github.com/rbritta/ssms-shared-queries/blob/main/SECURITY.md), not here.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The version in the panel caption ("SSMS Shared Queries 1.2.2") or the release you installed.
+      placeholder: 1.2.2
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: The steps in the panel, from a fresh Sync. Use a made-up query library, never a real one.
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: SSMS version, Git for Windows version, Windows version, and the host of the shared repository.
+      placeholder: SSMS 22.x, Git 2.5x, Windows 11, GitHub
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else
+      description: The panel's operation log (Info & history) or a screenshot. Remove repository URLs, user names and query text you do not want to share.
